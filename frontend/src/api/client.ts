@@ -40,12 +40,27 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const data = await res.json().catch(() => null)
   if (!res.ok) {
     if ((res.status === 401 || res.status === 403) && !path.startsWith('auth/')) {
-      session.authenticated = false
-      onUnauthorized?.()
+      // Only sign out if the server confirms the session is really gone.
+      if (!(await confirmSession())) {
+        session.authenticated = false
+        session.user = null
+        onUnauthorized?.()
+      }
     }
     throw new ApiError(res.status, data?.error?.message ?? `Request failed (${res.status})`)
   }
   return data as T
+}
+
+let pendingCheck: Promise<boolean> | null = null
+/** One shared session re-check for any burst of 401/403 responses. */
+function confirmSession(): Promise<boolean> {
+  pendingCheck ??= fetch('/api/auth/session', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((s) => Boolean(s?.authenticated))
+    .catch(() => false)
+    .finally(() => { setTimeout(() => { pendingCheck = null }, 0) })
+  return pendingCheck
 }
 
 export function qs(params: Record<string, string | number | null | undefined>): string {

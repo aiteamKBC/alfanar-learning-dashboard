@@ -51,6 +51,14 @@ cd backend
 
 Temporary grants expire automatically. `disable` also ends the user's active sessions.
 
+**Owner account from `.env`:** put `username=` and `password=` (lowercase) in the root `.env`, then run:
+
+```powershell
+cd backend; ..\.venv\Scripts\python manage.py provision_owner
+```
+
+This creates or updates an active, dashboard-only, temporary (14-day) account and stores only the password hash. It runs only when you invoke it; nothing reads these keys on requests or syncs. Re-running it with an unchanged password keeps existing sessions signed in. Changing the password in `.env` and re-running updates it, which signs out that account's existing sessions.
+
 ## Tests and build
 
 ```powershell

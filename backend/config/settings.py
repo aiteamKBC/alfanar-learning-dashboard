@@ -10,15 +10,23 @@ from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured
 
 try:
-    from dotenv import load_dotenv
+    from dotenv import dotenv_values
 except ImportError:  # pragma: no cover
-    load_dotenv = None
+    dotenv_values = None
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # backend/
 PROJECT_ROOT = BASE_DIR.parent
 
-if load_dotenv:
-    load_dotenv(PROJECT_ROOT / ".env")
+# Keys read only by the explicit `provision_owner` command, straight from the file.
+# They are never copied into the process environment (so they cannot appear in
+# os.environ / request.META of the running server).
+_FILE_ONLY_KEYS = {"username", "password"}
+
+if dotenv_values:
+    for _key, _value in dotenv_values(PROJECT_ROOT / ".env").items():
+        if _key.lower() in _FILE_ONLY_KEYS or _value is None:
+            continue
+        os.environ.setdefault(_key, _value)  # real environment variables take precedence
 
 
 def env_bool(name: str, default: bool = False) -> bool:
