@@ -18,6 +18,8 @@ from statistics import mean, median
 
 from django.db.models import Count, Max, Q, Sum
 
+from .attendance import metrics as att
+
 from .models import (
     LESSON_KINDS, Activity, ActivityKind, Course, Enrollment, LessonRecord, QuizAttempt,
     QuizResult, Submission, SyncRun,
@@ -42,9 +44,13 @@ DEFINITIONS = {
     "lesson_coverage": "Recorded lesson completions ÷ (enrollments × lessons known for that module).",
     "activity_coverage": "Enrollments with any recorded activity ÷ all enrollments.",
     "recorded_time": "Sum of lesson durations where the LMS recorded start/end times. Rows without a measured duration are excluded (not treated as zero).",
-    "delivered_sessions": "Recorded lecture videos (lecture parts) in this module that at least one learner has completed. The source has no session schedule, so this is a count of delivered recordings, not a share of planned sessions.",
-    "attendance": "The export has no scheduled sessions or attendance records (Session # is always 1 and no session IDs exist).",
+    "lecture_recordings": "Recorded lecture videos (lecture parts) in this module that at least one learner has completed (LMS).",
 }
+
+
+def defs() -> dict:
+    """LMS definitions plus attendance definitions (which depend on configured thresholds)."""
+    return {**DEFINITIONS, **att.definitions()}
 
 
 def _pct(num, den):
@@ -200,18 +206,15 @@ def summary(course_id=None, engagement=None) -> dict:
                                               len(enrollments))},
             "recorded_time": {"value": agg("lesson_seconds"), "timed_records": agg("lesson_timed"),
                               "untimed_records": agg("lesson_total") - agg("lesson_timed"), "unit": "seconds"},
-            "attendance": {"value": None, "available": False},
+            "attendance": att.aggregate(att.AttendanceIndex(),
+                                        [(e.learner.source_id, e.course.source_id) for e in enrollments]),
         },
-        "definitions": DEFINITIONS,
+        "definitions": defs(),
     }
 
 
-def delivered_sessions() -> dict[int, int]:
-    """Per course: distinct recorded lecture videos with at least one learner completion.
-
-    A module-level fact (independent of learner filters). The export has no session
-    schedule, so this counts delivered lecture recordings, not planned sessions.
-    """
+def lecture_recordings() -> dict[int, int]:
+    """Per course: distinct recorded lecture videos with at least one learner completion (LMS)."""
     rows = (Activity.objects.filter(kind=ActivityKind.VIDEO, lesson_records__isnull=False)
             .values("course_id").annotate(n=Count("id", distinct=True)))
     return {r["course_id"]: r["n"] for r in rows}
@@ -224,7 +227,8 @@ def charts(course_id=None, engagement=None, activity_type=None) -> dict:
     by_course = defaultdict(list)
     for e in enrollments:
         by_course[e.course_id].append(e)
-    delivered = delivered_sessions()
+    recordings = lecture_recordings()
+    index = att.AttendanceIndex()
     kinds = [activity_type] if activity_type else [k.value for k in ActivityKind]
 
     module_progress, quiz_by_module, completion = [], [], []
@@ -235,7 +239,10 @@ def charts(course_id=None, engagement=None, activity_type=None) -> dict:
             "course_id": c.source_id, "course": c.title, "enrollments": len(ens),
             "active": sum(1 for e in ens if stats[e.id]["has_activity"]),
             "mean_progress": _avg(prog), "median_progress": round(median(prog), 1) if prog else None,
-            "delivered_sessions": delivered.get(cid, 0),
+            # Module-level facts (independent of learner filters):
+            "delivered_sessions": len(index.sessions_by_course[c.source_id]) if index.has_data(c.source_id) else None,
+            "lecture_recordings": recordings.get(cid, 0),
+            "attendance": att.aggregate(index, [(e.learner.source_id, c.source_id) for e in ens]),
         })
         n_quiz = cat[cid].get("quiz", 0)
         attempted = sum(stats[e.id]["quizzes_attempted"] for e in ens)
@@ -298,7 +305,7 @@ def charts(course_id=None, engagement=None, activity_type=None) -> dict:
         "activity_by_type": by_type,
         "progress_distribution": {"buckets": dist, "missing": missing_progress, "total": len(enrollments)},
         "learner_module_matrix": {"modules": module_cols, "rows": matrix},
-        "definitions": DEFINITIONS,
+        "definitions": defs(),
     }
 
 
@@ -306,7 +313,8 @@ def charts(course_id=None, engagement=None, activity_type=None) -> dict:
 # Learners
 # ----------------------------------------------------------------------------------------
 
-def enrollment_payload(e: Enrollment, s: dict, cat) -> dict:
+def enrollment_payload(e: Enrollment, s: dict, cat, index: att.AttendanceIndex | None = None) -> dict:
+    index = index or att.AttendanceIndex()
     known_q = cat[e.course_id].get("quiz", 0)
     known_l = _known(cat, e.course_id, LESSON_KINDS)
     known_a = cat[e.course_id].get("assignment", 0)
@@ -332,6 +340,7 @@ def enrollment_payload(e: Enrollment, s: dict, cat) -> dict:
         "last_activity": s["last_activity"],
         "last_login": e.last_login,
         "registered_at": e.registered_at,
+        "attendance": index.enrollment(e.learner.source_id, e.course.source_id),
     }
 
 
@@ -341,7 +350,16 @@ def learner_rollup(enrollment_payloads: list[dict]) -> dict:
     # pair-level mean of latest scores across all modules
     total_score = sum((p["mean_latest_score"] or 0) * p["quizzes_graded"] for p in enrollment_payloads)
     last = [p["last_activity"] for p in enrollment_payloads if p["last_activity"]]
+    covered = [p["attendance"] for p in enrollment_payloads if p["attendance"]["available"]]
+    att_attended = sum(a["attended"] for a in covered)
+    att_expected = sum(a["delivered"] for a in covered)
     return {
+        "attendance": {
+            "available": bool(covered), "attended": att_attended if covered else None,
+            "expected": att_expected if covered else None, "pct": _pct(att_attended, att_expected) if covered else None,
+            "live_seconds": sum(a["live_seconds"] for a in covered) if covered else None,
+            "modules_covered": len(covered), "modules_total": len(enrollment_payloads),
+        },
         "modules": len(enrollment_payloads),
         "mean_progress": _avg(prog),
         "lessons_completed": sum(p["lessons_completed"] for p in enrollment_payloads),
@@ -369,11 +387,12 @@ def learner_directory(search=None, course_id=None, engagement=None, ordering="na
     enrollments = list(qs)
     stats = enrollment_stats(e.id for e in enrollments)
     cat = catalogue()
+    index = att.AttendanceIndex()
 
     grouped = defaultdict(list)
     learners = {}
     for e in enrollments:
-        grouped[e.learner_id].append(enrollment_payload(e, stats[e.id], cat))
+        grouped[e.learner_id].append(enrollment_payload(e, stats[e.id], cat, index))
         learners[e.learner_id] = e.learner
 
     rows = []
@@ -405,6 +424,7 @@ def learner_directory(search=None, course_id=None, engagement=None, ordering="na
         "quiz_score": lambda r: r["mean_latest_score"],
         "quizzes": lambda r: r["quizzes_attempted"],
         "modules": lambda r: r["modules"],
+        "attendance": lambda r: r["attendance"]["pct"],
     }
     kf = sort_keys.get(key, sort_keys["name"])
     present = [r for r in rows if kf(r) is not None]
@@ -414,15 +434,16 @@ def learner_directory(search=None, course_id=None, engagement=None, ordering="na
 
 
 def learner_detail(learner) -> dict:
-    enrollments = list(Enrollment.objects.filter(learner=learner).select_related("course"))
+    enrollments = list(Enrollment.objects.filter(learner=learner).select_related("course", "learner"))
     stats = enrollment_stats(e.id for e in enrollments)
     cat = catalogue()
-    payloads = sorted((enrollment_payload(e, stats[e.id], cat) for e in enrollments), key=lambda p: p["course"])
+    index = att.AttendanceIndex()
+    payloads = sorted((enrollment_payload(e, stats[e.id], cat, index) for e in enrollments), key=lambda p: p["course"])
     return {
         "learner": {"learner_id": learner.source_id, "name": learner.name, "email": learner.email},
         "summary": learner_rollup(payloads),
         "courses": payloads,
-        "definitions": DEFINITIONS,
+        "definitions": defs(),
     }
 
 
@@ -488,6 +509,13 @@ def module_matrix(enrollment: Enrollment) -> dict:
                                 for r in rows if r.get("lesson")),
     }
     present_kinds = [k for k in ActivityKind.values if any(r["kind"] == k for r in rows)]
+    index = att.AttendanceIndex()
+    learner_sid, course_sid = enrollment.learner.source_id, enrollment.course.source_id
+    summary_att = index.enrollment(learner_sid, course_sid)
+    attendance = {**summary_att, "sessions": index.sessions_for(learner_sid, course_sid) if summary_att["available"] else []}
+    if not summary_att["available"]:
+        attendance["reason"] = ("No Microsoft Teams meeting is mapped to this module, so delivered sessions and "
+                                "attendance are not available.")
     return {
         "learner": {"learner_id": enrollment.learner.source_id, "name": enrollment.learner.name},
         "course": {"course_id": enrollment.course.source_id, "title": enrollment.course.title,
@@ -495,11 +523,11 @@ def module_matrix(enrollment: Enrollment) -> dict:
         "matrix_basis": "activity",
         "matrix_note": ("Rows are the module's learning activities known from the export, in LMS item-ID order. "
                         "The source has no scheduled-session identifiers, so activities are not grouped into sessions."),
-        "attendance": {"available": False, "reason": DEFINITIONS["attendance"]},
+        "attendance": attendance,
         "kinds": present_kinds,
         "rows": rows,
         "footer": footer,
-        "definitions": DEFINITIONS,
+        "definitions": defs(),
     }
 
 
@@ -526,4 +554,5 @@ def sync_status() -> dict:
             "interval_seconds": settings.SYNC_INTERVAL_SECONDS,
             "scope": "https://www.googleapis.com/auth/spreadsheets.readonly",
         },
+        "teams_attendance": att.import_status(),
     }

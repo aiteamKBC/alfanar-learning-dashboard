@@ -10,7 +10,8 @@ import StateBlock from '@/components/common/StateBlock.vue'
 import KpiCard from '@/components/dashboard/KpiCard.vue'
 import CourseCard from '@/components/learners/CourseCard.vue'
 import ActivityMatrix from '@/components/matrix/ActivityMatrix.vue'
-import { dateTime, num, pct } from '@/utils/format'
+import LiveSessions from '@/components/matrix/LiveSessions.vue'
+import { dateTime, hours, num, pct } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -88,7 +89,11 @@ const materialsSub = computed(() => Object.entries(lessonsByType.value).filter((
           <KpiCard label="Latest quiz score" icon="target" tone="blue" :value="pct(s.mean_latest_score)" :meter="s.mean_latest_score" accent="#2a78d6" :sub="s.quizzes_graded ? `${s.quizzes_passed_latest} / ${s.quizzes_graded} latest attempts passed` : 'No graded attempts recorded'" :info="defs.mean_latest_score" />
           <KpiCard label="Completed materials" icon="book" tone="navy" :value="num(s.lessons_completed)" :sub="materialsSub" :info="defs.materials_completed" />
           <KpiCard label="Assignments" icon="upload" tone="neutral" :value="`${num(s.assignments_submitted)} / ${num(s.assignments_known)}`" sub="Non-draft submissions / known assignments" :info="defs.assignment_coverage" />
-          <KpiCard label="Attendance" icon="info" tone="neutral" value="Not available" sub="No session or attendance records in source" :info="defs.attendance" />
+          <KpiCard v-if="s.attendance.available" label="Live attendance" icon="users" tone="navy" accent="#142c52"
+            :value="pct(s.attendance.pct)" :meter="s.attendance.pct"
+            :sub="`${s.attendance.attended} / ${s.attendance.expected} delivered sessions · ${hours(s.attendance.live_seconds)} live · ${s.attendance.modules_covered} of ${s.attendance.modules_total} modules have Teams data`"
+            :info="defs.attendance" />
+          <KpiCard v-else label="Live attendance" icon="users" tone="neutral" value="Not available" sub="No mapped Microsoft Teams meeting for this learner's modules" :info="defs.attendance" />
         </div>
 
         <section>
@@ -113,10 +118,7 @@ const materialsSub = computed(() => Object.entries(lessonsByType.value).filter((
                   <div class="font-heading text-[22px] font-semibold text-ink tabular">{{ pct(matrix.data.value.course.progress_pct) }}</div>
                 </div>
               </div>
-              <div class="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-2.5 text-[13px] text-amber-900">
-                <Icon name="info" :size="15" class="mt-0.5 shrink-0" />
-                <span><span class="font-semibold">Attendance is not available.</span> {{ matrix.data.value.attendance.reason }}</span>
-              </div>
+              <LiveSessions :attendance="matrix.data.value.attendance" :definition="defs.attendance" class="mb-4" />
               <StateBlock :empty="matrix.data.value.rows.length === 0" empty-title="No activities recorded for this module" empty-text="The export contains no quizzes, lessons or assignments for this module.">
                 <ActivityMatrix :matrix="matrix.data.value" />
               </StateBlock>

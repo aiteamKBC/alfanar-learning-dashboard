@@ -82,6 +82,16 @@ Tests use a synthetic workbook. If the real workbook is present, they also recon
 - **Google setup:** share the spreadsheet with the service account as **Viewer**. Keep the JSON key in `secrets/` (git-ignored) or outside the repository, then set `GOOGLE_SHEETS_ENABLED=true`, `GOOGLE_SHEETS_SPREADSHEET_ID` (alias `GOOGLE_SHEETS_ID`) and `GOOGLE_SERVICE_ACCOUNT_FILE` in `.env`. The only scope requested is `spreadsheets.readonly`, and the code never calls any write API.
 - The scheduler holds an exclusive lock, so a second instance refuses to start. In production, run it as the single `deploy/alfanar-sync.service` unit.
 
+## Microsoft Teams attendance
+
+This is a separate, read-only source. The LMS/Google sync never changes it. To refresh it after replacing the export in `data/`:
+
+```powershell
+cd backend; ..\.venv\Scripts\python manage.py import_teams_attendance
+```
+
+Matching rules, module mappings, the delivered-session rule and known caveats are documented in [docs/attendance.md](docs/attendance.md).
+
 ## API (all require an authenticated session)
 
 | Endpoint | Purpose |

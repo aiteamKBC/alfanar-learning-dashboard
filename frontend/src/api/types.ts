@@ -14,11 +14,11 @@ export interface Kpi {
 }
 
 export interface Summary {
-  kpis: Record<string, Kpi>
+  kpis: Record<string, Kpi> & { attendance: AttendanceAggregate }
   definitions: Definitions
 }
 
-export interface ModuleProgress { course_id: number; course: string; enrollments: number; active: number; mean_progress: number | null; median_progress: number | null; delivered_sessions: number }
+export interface ModuleProgress { course_id: number; course: string; enrollments: number; active: number; mean_progress: number | null; median_progress: number | null; delivered_sessions: number | null; lecture_recordings: number; attendance: AttendanceAggregate }
 export interface QuizByModule { course_id: number; course: string; known_quizzes: number; attempted_pairs: number; possible_pairs: number; completion_pct: number | null; mean_latest_score: number | null; pass_rate_pct: number | null }
 export interface CompletionCell { completed: number; possible: number; known_items: number; pct: number | null }
 export interface ActivityCompletion { course_id: number; course: string; by_type: Record<string, CompletionCell> }
@@ -40,6 +40,7 @@ export interface FiltersResponse {
 }
 
 export interface Rollup {
+  attendance: RollupAttendance
   modules: number
   mean_progress: number | null
   lessons_completed: number
@@ -84,6 +85,7 @@ export interface CourseProgress {
   last_activity: string | null
   last_login: string | null
   registered_at: string | null
+  attendance: EnrollmentAttendance
 }
 
 export interface LearnerDetail {
@@ -122,7 +124,7 @@ export interface Matrix {
   course: { course_id: number; title: string; progress_pct: number | null }
   matrix_basis: string
   matrix_note: string
-  attendance: { available: boolean; reason: string }
+  attendance: MatrixAttendance
   kinds: Kind[]
   rows: MatrixRow[]
   footer: {
@@ -156,4 +158,53 @@ export interface SyncStatus {
   last_run: SyncRunInfo | null
   last_success: SyncRunInfo | null
   google_sheets: { enabled: boolean; configured: boolean; interval_seconds: number; scope: string }
+  teams_attendance: { last_status: string; last_success_at: string | null; coverage_start: string | null; coverage_end: string | null; source_ref: string; warnings: string[] } | null
+}
+
+// ---- Microsoft Teams attendance ----------------------------------------------
+export interface AttendanceAggregate {
+  available: boolean
+  attended: number
+  expected: number
+  pct: number | null
+  live_seconds: number
+  delivered_sessions: number
+  enrollments_covered: number
+  enrollments_total: number
+  enrollments_without_teams_identity: number
+  modules_without_data: number[]
+}
+export interface EnrollmentAttendance {
+  available: boolean
+  delivered: number | null
+  attended: number | null
+  pct: number | null
+  live_seconds: number | null
+  teams_identity?: boolean
+  reason?: string
+}
+export interface RollupAttendance {
+  available: boolean
+  attended: number | null
+  expected: number | null
+  pct: number | null
+  live_seconds: number | null
+  modules_covered: number
+  modules_total: number
+}
+export interface LiveSession {
+  number: number
+  date: string
+  starts_at: string
+  ends_at: string
+  subject: string
+  learners_attended: number
+  status: 'attended' | 'brief' | 'not_recorded'
+  presence_seconds: number | null
+  first_join: string | null
+  last_leave: string | null
+  joins: number | null
+}
+export interface MatrixAttendance extends EnrollmentAttendance {
+  sessions: LiveSession[]
 }

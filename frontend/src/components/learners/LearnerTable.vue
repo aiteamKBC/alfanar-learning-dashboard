@@ -4,7 +4,7 @@ import type { LearnerRow } from '@/api/types'
 import Avatar from '@/components/common/Avatar.vue'
 import Icon from '@/components/common/Icon.vue'
 import ProgressBar from '@/components/common/ProgressBar.vue'
-import { dateTime, num, pct } from '@/utils/format'
+import { dateTime, hours, num, pct } from '@/utils/format'
 import { shortLabel } from '@/components/dashboard/echarts'
 
 defineProps<{ rows: LearnerRow[]; ordering: string }>()
@@ -15,6 +15,7 @@ const cols = [
   { key: 'name', label: 'Learner', sortable: true },
   { key: 'modules', label: 'Enrolled modules', sortable: true },
   { key: 'progress', label: 'Mean LMS progress', sortable: true },
+  { key: 'attendance', label: 'Live attendance', sortable: true },
   { key: 'lessons', label: 'Materials completed', sortable: true },
   { key: 'quizzes', label: 'Quizzes attempted', sortable: true },
   { key: 'quiz_score', label: 'Latest quiz score', sortable: true },
@@ -31,7 +32,7 @@ function open(id: number) { router.push(`/learners/${id}`) }
 
 <template>
   <div class="card matrix-scroll overflow-x-auto">
-    <table class="w-full min-w-[1120px] text-sm">
+    <table class="w-full min-w-[1280px] text-sm">
       <thead class="border-b border-line bg-subtle/70 text-left">
         <tr>
           <th v-for="c in cols" :key="c.key" class="eyebrow whitespace-nowrap px-4 py-3" :class="{ 'sticky left-0 z-10 bg-[#f6f5f1]': c.key === 'name' }" :aria-sort="ordering === c.key ? 'ascending' : ordering === `-${c.key}` ? 'descending' : undefined">
@@ -59,6 +60,15 @@ function open(id: number) { router.push(`/learners/${id}`) }
             </div>
           </td>
           <td class="w-48 px-4 py-3"><ProgressBar :value="r.mean_progress" /></td>
+          <td class="w-44 px-4 py-3">
+            <template v-if="r.attendance.available">
+              <ProgressBar :value="r.attendance.pct" color="#142c52" />
+              <div class="mt-0.5 text-[11px] text-ink-3 tabular" :title="`${r.attendance.modules_covered} of ${r.attendance.modules_total} modules have Teams data`">
+                {{ r.attendance.attended }} / {{ r.attendance.expected }} sessions · {{ hours(r.attendance.live_seconds) }}
+              </div>
+            </template>
+            <span v-else class="text-[12px] text-ink-3" title="No mapped Teams meeting for this learner's modules">Not available</span>
+          </td>
           <td class="px-4 py-3 tabular font-medium text-ink">{{ num(r.lessons_completed) }}</td>
           <td class="px-4 py-3 tabular"><span class="font-medium text-ink">{{ num(r.quizzes_attempted) }}</span><span class="text-ink-3"> / {{ num(r.quizzes_known) }}</span></td>
           <td class="px-4 py-3 tabular">

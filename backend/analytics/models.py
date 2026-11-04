@@ -185,3 +185,77 @@ class DashboardAccess(models.Model):
 
         now = now or timezone.now()
         return self.revoked_at is None and (self.expires_at is None or self.expires_at > now)
+
+
+# ----------------------------------------------------------------------------------------
+# Microsoft Teams attendance (separate source; never touched by the LMS/Google sync).
+# Linked to the LMS registry by source IDs, not foreign keys, so LMS reconciliation can
+# never cascade-delete or overwrite attendance.
+# ----------------------------------------------------------------------------------------
+
+class AttendanceImportRun(models.Model):
+    class Status(models.TextChoices):
+        RUNNING = "running", "Running"
+        SUCCESS = "success", "Success"
+        FAILED = "failed", "Failed"
+
+    source_ref = models.CharField(max_length=300, blank=True)  # file name only
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.RUNNING)
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    source_modified_at = models.DateTimeField(null=True, blank=True)
+    coverage_start = models.DateField(null=True, blank=True)
+    coverage_end = models.DateField(null=True, blank=True)
+    changed = models.BooleanField(default=False)
+    diagnostics = models.JSONField(default=dict, blank=True)  # aggregate counts only, no personal data
+    warnings = models.JSONField(default=list, blank=True)
+    errors = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+
+
+class TeamsMeeting(models.Model):
+    class Mapping(models.TextChoices):
+        EXACT_TITLE = "exact_title", "Exact module title"
+        APPROVED_RULE = "approved_rule", "Approved mapping rule"
+        UNMAPPED = "unmapped", "Unmapped (needs review)"
+
+    meeting_id = models.CharField(max_length=300, unique=True)  # Teams "Meeting ID"
+    subject = models.CharField(max_length=500)
+    course_source_id = models.BigIntegerField(null=True, blank=True)
+    mapping_status = models.CharField(max_length=20, choices=Mapping.choices, default=Mapping.UNMAPPED)
+    mapping_note = models.CharField(max_length=500, blank=True)
+
+
+class LectureSession(models.Model):
+    """One lecture occurrence = one Teams meeting series on one UTC date (reports merged)."""
+
+    meeting = models.ForeignKey(TeamsMeeting, on_delete=models.CASCADE, related_name="sessions")
+    session_date = models.DateField()
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField()
+    report_count = models.IntegerField()
+    verified_learners = models.IntegerField()       # learners meeting the attendance threshold
+    delivered = models.BooleanField()               # passes the delivered-session rule
+    exclusion_reason = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["session_date"]
+        constraints = [models.UniqueConstraint(fields=["meeting", "session_date"], name="uniq_lecture_session")]
+
+
+class SessionAttendance(models.Model):
+    """Verified learner presence in one lecture occurrence (merged, de-duplicated intervals)."""
+
+    session = models.ForeignKey(LectureSession, on_delete=models.CASCADE, related_name="attendance")
+    learner_source_id = models.BigIntegerField(db_index=True)
+    presence_seconds = models.IntegerField()
+    interval_count = models.IntegerField()
+    first_join = models.DateTimeField()
+    last_leave = models.DateTimeField()
+    attended = models.BooleanField()                # presence >= attendance threshold
+    match_method = models.CharField(max_length=20)  # email | alias
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["session", "learner_source_id"], name="uniq_session_attendance")]

@@ -94,11 +94,13 @@ class SummaryMetricTests(ApiTestBase):
         self.assertEqual(by_type, {"quiz": 3, "video": 2, "pdf": 1, "audio": 1, "reading": 1, "assignment": 1})
         self.assertEqual(sum(b["count"] for b in c["progress_distribution"]["buckets"]), 3)
         self.assertEqual(c["progress_distribution"]["missing"], 1)
-        delivered = {m["course_id"]: m["delivered_sessions"] for m in c["module_progress"]}
-        self.assertEqual(delivered, {9001: 1, 9002: 0})  # one video (501) with completions; none in 9002
+        recordings = {m["course_id"]: m["lecture_recordings"] for m in c["module_progress"]}
+        self.assertEqual(recordings, {9001: 1, 9002: 0})  # one video (501) with completions; none in 9002
+        # No Teams data imported in this test -> delivered sessions are not available (None, never 0)
+        self.assertEqual({m["course_id"]: m["delivered_sessions"] for m in c["module_progress"]}, {9001: None, 9002: None})
         # module-level fact: unaffected by learner filters
         inactive = self.client.get("/api/dashboard/charts?engagement=inactive").json()
-        self.assertEqual({m["course_id"]: m["delivered_sessions"] for m in inactive["module_progress"]}.get(9002), 0)
+        self.assertEqual({m["course_id"]: m["lecture_recordings"] for m in inactive["module_progress"]}.get(9002), 0)
         matrix = {r["learner_id"]: r["progress"] for r in c["learner_module_matrix"]["rows"]}
         self.assertEqual(matrix[101], {"9001": 50.0, "9002": 0.0})
 
@@ -150,5 +152,5 @@ class LearnerApiTests(ApiTestBase):
         self.assertEqual(self.client.get("/api/learners/103/courses/9001/matrix").status_code, 404)
 
     def test_query_count_bounded(self):
-        with self.assertNumQueries(9):  # +1 for the dashboard-access check
+        with self.assertNumQueries(11):  # +1 access check, +2 attendance index (constant)
             self.client.get("/api/learners")

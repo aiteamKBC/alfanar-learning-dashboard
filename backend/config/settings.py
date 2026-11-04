@@ -149,6 +149,22 @@ REST_FRAMEWORK = {
 ALFANAR_EXCEL_PATH = Path(os.environ.get("ALFANAR_EXCEL_PATH") or "data/Alfanar Endpoint.xlsx")
 if not ALFANAR_EXCEL_PATH.is_absolute():
     ALFANAR_EXCEL_PATH = PROJECT_ROOT / ALFANAR_EXCEL_PATH
+# --- Microsoft Teams attendance (separate, read-only source) ---------------
+def _project_path(value: str) -> Path:
+    p = Path(value)
+    return p if p.is_absolute() else PROJECT_ROOT / p
+
+
+TEAMS_ATTENDANCE_PATH = _project_path(os.environ.get("TEAMS_ATTENDANCE_PATH") or "data/PCP_Al_Fanar_Teams_Original_Data 1.xlsx")
+# Optional verified aliases (CSV: teams_email,learner_id). Contains emails -> keep under data/ (git-ignored).
+TEAMS_ALIASES_PATH = _project_path(os.environ.get("TEAMS_ALIASES_PATH") or "data/teams_email_aliases.csv")
+# Email domains of the training provider's staff (trainers/organisers), excluded from learner totals.
+TEAMS_STAFF_DOMAINS = env_list("TEAMS_STAFF_DOMAINS", "kentbusinesscollege.com")
+# A learner "attended" a lecture with at least this much merged presence.
+TEAMS_MIN_ATTENDANCE_MINUTES = int(os.environ.get("TEAMS_MIN_ATTENDANCE_MINUTES", "10"))
+# A lecture occurrence counts as "delivered" when at least this many verified learners attended it.
+TEAMS_MIN_LEARNERS_FOR_DELIVERED = int(os.environ.get("TEAMS_MIN_LEARNERS_FOR_DELIVERED", "5"))
+
 GOOGLE_SHEETS_ENABLED = env_bool("GOOGLE_SHEETS_ENABLED", False)
 # GOOGLE_SHEETS_ID is accepted as an alias.
 GOOGLE_SHEETS_SPREADSHEET_ID = (

@@ -23,7 +23,10 @@ const cards = computed(() => props.progress.map((m) => ({ ...m, quiz: props.quiz
       @click="$emit('select', m.course_id)"
     >
       <div class="flex items-start gap-4">
-        <ProgressRing :count="m.delivered_sessions" caption="sessions" :label="`${m.delivered_sessions} delivered sessions`" />
+        <ProgressRing
+          :count="m.delivered_sessions" :caption="m.delivered_sessions === null ? 'no Teams data' : 'sessions'"
+          :color="m.delivered_sessions === null ? '#d6d3cb' : '#1baf7a'"
+          :label="m.delivered_sessions === null ? 'Delivered sessions not available' : `${m.delivered_sessions} delivered sessions`" />
         <div class="min-w-0 flex-1">
           <div class="eyebrow flex items-center gap-1">Delivered sessions
             <InfoTip v-if="deliveredInfo" :text="deliveredInfo" label="About delivered sessions" />

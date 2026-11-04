@@ -46,3 +46,10 @@ export function rampColor(v: number) {
   return SEQ_RAMP[i]
 }
 export function rampText(v: number) { return v >= 55 ? '#ffffff' : '#0f172a' }
+
+/** Seconds -> '1,339 h' (or minutes when under an hour). */
+export function hours(seconds: number | null | undefined) {
+  if (seconds === null || seconds === undefined) return '—'
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min`
+  return `${nf.format(Math.round(seconds / 3600))} h`
+}

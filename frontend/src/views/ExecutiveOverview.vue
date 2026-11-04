@@ -14,7 +14,7 @@ import KpiCard from '@/components/dashboard/KpiCard.vue'
 import LearnerModuleHeatmap from '@/components/dashboard/LearnerModuleHeatmap.vue'
 import ModuleSnapshot from '@/components/dashboard/ModuleSnapshot.vue'
 import { shortLabel } from '@/components/dashboard/echarts'
-import { num, pct, ratio } from '@/utils/format'
+import { hours, num, pct, ratio } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -56,6 +56,11 @@ const kpiCards = computed(() => {
   const status = Object.entries(x.submissions.by_status ?? {}).map(([s, n]) => `${n} ${s}`).join(' · ')
   return [
     { label: 'Mean LMS progress', icon: 'gauge', tone: 'teal' as const, value: pct(x.mean_progress.value), meter: x.mean_progress.value, sub: `Median ${pct(x.mean_progress.median)} · ${num(x.mean_progress.n)} enrollments`, info: defs.value.mean_progress },
+    x.attendance.available
+      ? { label: 'Live attendance', icon: 'users', tone: 'navy' as const, accent: '#142c52', value: pct(x.attendance.pct), meter: x.attendance.pct,
+          sub: `${ratio(x.attendance.attended, x.attendance.expected)} learner-sessions · ${num(x.attendance.delivered_sessions)} delivered sessions · ${hours(x.attendance.live_seconds)} live`,
+          info: `${defs.value.attendance} ${x.attendance.enrollments_without_teams_identity} of ${x.attendance.enrollments_covered} covered enrollments have no matched Teams identity and count as not attended.` }
+      : { label: 'Live attendance', icon: 'users', tone: 'neutral' as const, value: 'Not available', sub: 'No mapped Microsoft Teams meeting for this selection', info: defs.value.attendance },
     { label: 'Mean latest quiz score', icon: 'target', tone: 'blue' as const, accent: '#2a78d6', value: pct(x.mean_latest_score.value), meter: x.mean_latest_score.value, sub: `Latest graded attempt across ${num(x.mean_latest_score.n)} quizzes`, info: defs.value.mean_latest_score },
     { label: 'Quiz pass rate', icon: 'award', tone: 'blue' as const, accent: '#2a78d6', value: pct(x.pass_rate.pct), meter: x.pass_rate.pct, sub: `${ratio(x.pass_rate.value ?? 0, x.pass_rate.denominator ?? 0)} latest attempts passed`, info: defs.value.pass_rate },
     { label: 'Assignment submissions', icon: 'upload', tone: 'neutral' as const, accent: '#6b7489', value: num(x.submissions.value), meter: x.assignment_coverage.pct, sub: `${status || 'none'} · ${pct(x.assignment_coverage.pct)} of possible`, info: `${defs.value.submissions} ${defs.value.assignment_coverage}` },
@@ -139,15 +144,23 @@ function clearFilters() { router.replace({ query: {} }) }
     <StateBlock :loading="summary.loading.value && !summary.data.value" :error="summary.error.value" :empty="k?.enrollments.value === 0" height="9rem" @retry="summary.reload">
       <section :class="{ 'opacity-60 transition-opacity': summary.loading.value }">
         <h2 class="eyebrow mb-2">Key metrics</h2>
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <KpiCard v-for="card in kpiCards" :key="card.label" v-bind="card" />
         </div>
       </section>
     </StateBlock>
 
-    <div class="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-[13px] text-amber-900">
-      <Icon name="info" :size="16" class="mt-0.5 shrink-0" />
-      <p><span class="font-semibold">Attendance is not available.</span> {{ defs.attendance }}</p>
+    <div v-if="k" class="flex items-start gap-3 rounded-xl border border-line bg-white/70 px-4 py-3 text-[13px] text-ink-2">
+      <Icon name="info" :size="16" class="mt-0.5 shrink-0 text-navy" />
+      <p>
+        <span class="font-semibold text-ink">Attendance source: Microsoft Teams export</span>
+        <template v-if="k.attendance.available"> — verified learners matched by exact email; trainers, organisers and external participants excluded.</template>
+        <template v-if="k.attendance.modules_without_data.length">
+          <span class="font-medium text-amber-800">
+            Not available for {{ k.attendance.modules_without_data.map((id) => filters.data.value?.courses.find((c) => c.course_id === id)?.title ?? id).join(', ') }}
+          </span> — no Teams meeting is mapped to {{ k.attendance.modules_without_data.length === 1 ? 'this module' : 'these modules' }}.
+        </template>
+      </p>
     </div>
 
     <!-- Charts -->

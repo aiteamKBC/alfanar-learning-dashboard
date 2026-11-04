@@ -38,6 +38,16 @@ defineEmits<{ select: [] }>()
         <dd class="tabular font-semibold text-ink">{{ pct(course.mean_latest_score) }}</dd>
       </div>
     </dl>
+    <div class="mt-3">
+      <div class="flex justify-between text-[11px] text-ink-3">
+        <span>Live attendance</span>
+        <span class="tabular">
+          <template v-if="course.attendance.available">{{ course.attendance.attended }} / {{ course.attendance.delivered }} · {{ pct(course.attendance.pct) }}</template>
+          <template v-else>Not available</template>
+        </span>
+      </div>
+      <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-subtle"><div class="h-full rounded-full bg-navy" :style="{ width: `${course.attendance.pct ?? 0}%` }" /></div>
+    </div>
     <div class="mt-3 flex items-center justify-between text-[11.5px]">
       <span class="text-ink-3">Last activity {{ dateTime(course.last_activity, false) }}</span>
       <span class="inline-flex items-center gap-1 font-semibold" :class="selected ? 'text-navy' : 'text-series-1'">
