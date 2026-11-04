@@ -7,9 +7,7 @@ import { useAsync } from '@/api/useAsync'
 import FilterSelect from '@/components/common/FilterSelect.vue'
 import Icon from '@/components/common/Icon.vue'
 import StateBlock from '@/components/common/StateBlock.vue'
-import SyncStatusBar from '@/components/common/SyncStatusBar.vue'
 import ChartCard from '@/components/dashboard/ChartCard.vue'
-import ColumnChart from '@/components/dashboard/ColumnChart.vue'
 import CompletionHeatmap from '@/components/dashboard/CompletionHeatmap.vue'
 import HBarChart from '@/components/dashboard/HBarChart.vue'
 import KpiCard from '@/components/dashboard/KpiCard.vue'
@@ -75,15 +73,6 @@ const achievementCards = computed(() => {
 })
 
 const c = computed(() => charts.data.value)
-const moduleProgress = computed(() => {
-  const rows = c.value?.module_progress ?? []
-  return {
-    categories: rows.map((r) => shortLabel(r.course)), full: rows.map((r) => r.course),
-    series: [{ name: 'Mean progress', color: '#1baf7a', data: rows.map((r) => r.mean_progress) }],
-    tooltip: rows.map((r) => [`Median progress: ${pct(r.median_progress)}`, `Enrolled: ${r.enrollments} · with activity: ${r.active}`]),
-    table: { columns: ['Module', 'Enrolled', 'With activity', 'Mean progress', 'Median progress'], rows: rows.map((r) => [r.course, r.enrollments, r.active, pct(r.mean_progress), pct(r.median_progress)]) },
-  }
-})
 const quizModule = computed(() => {
   const rows = c.value?.quiz_by_module ?? []
   return {
@@ -97,14 +86,6 @@ const quizModule = computed(() => {
     table: { columns: ['Module', 'Known quizzes', 'Attempted / possible', 'Completion', 'Mean latest score', 'Pass rate'], rows: rows.map((r) => [r.course, r.known_quizzes, `${r.attempted_pairs} / ${r.possible_pairs}`, pct(r.completion_pct), pct(r.mean_latest_score), pct(r.pass_rate_pct)]) },
   }
 })
-const byType = computed(() => {
-  const rows = c.value?.activity_by_type ?? []
-  return {
-    categories: rows.map((r) => r.label), series: [{ name: 'Records', color: '#2a78d6', data: rows.map((r) => r.count) }],
-    table: { columns: ['Activity', 'Records'], rows: rows.map((r) => [r.label, num(r.count)]) },
-  }
-})
-const dist = computed(() => c.value?.progress_distribution)
 const completionTable = computed(() => {
   const rows = c.value?.activity_completion ?? []
   const kinds = rows.length ? Object.keys(rows[0].by_type) : []
@@ -128,7 +109,7 @@ function clearFilters() { router.replace({ query: {} }) }
             Progress figures are LMS-reported, not qualification outcomes.
           </p>
         </div>
-        <dl class="grid grid-cols-3 gap-6 sm:gap-10">
+        <dl class="grid grid-cols-2 gap-6 sm:gap-10">
           <div>
             <dt class="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-blue-100/70">Learners</dt>
             <dd class="font-heading mt-1 text-[32px] font-semibold leading-none tabular">{{ k ? num(k.unique_learners.value) : '—' }}</dd>
@@ -136,10 +117,6 @@ function clearFilters() { router.replace({ query: {} }) }
           <div>
             <dt class="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-blue-100/70">Modules</dt>
             <dd class="font-heading mt-1 text-[32px] font-semibold leading-none tabular">{{ k ? num(k.modules.value) : '—' }}</dd>
-          </div>
-          <div>
-            <dt class="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-blue-100/70">Enrollments</dt>
-            <dd class="font-heading mt-1 text-[32px] font-semibold leading-none tabular">{{ k ? num(k.enrollments.value) : '—' }}</dd>
           </div>
         </dl>
       </div>
@@ -154,8 +131,6 @@ function clearFilters() { router.replace({ query: {} }) }
       <button v-if="hasFilters" class="focus-ring h-9 rounded-md px-3 text-sm font-medium text-series-1 hover:bg-blue-50" @click="clearFilters">Clear filters</button>
       <span v-if="summary.loading.value || charts.loading.value" class="ml-auto inline-flex items-center gap-1.5 self-center text-[12px] text-ink-3"><Icon name="refresh" :size="13" class="animate-spin" />Updating…</span>
     </section>
-
-    <SyncStatusBar />
 
     <!-- Module snapshot -->
     <section>
@@ -196,10 +171,6 @@ function clearFilters() { router.replace({ query: {} }) }
     <!-- Charts -->
     <StateBlock :loading="charts.loading.value && !charts.data.value" :error="charts.error.value" :empty="(c?.module_progress.length ?? 0) === 0" height="24rem" @retry="charts.reload">
       <div class="grid gap-4 lg:grid-cols-2" :class="{ 'opacity-60 transition-opacity': charts.loading.value }">
-        <ChartCard title="Module progress comparison" subtitle="Mean LMS-reported progress per module" :info="defs.mean_progress" :table="moduleProgress.table">
-          <HBarChart :categories="moduleProgress.categories" :full-labels="moduleProgress.full" :series="moduleProgress.series" :max="100" unit="%" :tooltip-rows="moduleProgress.tooltip" />
-        </ChartCard>
-
         <ChartCard title="Quiz achievement by module" subtitle="Completion, mean latest score and pass rate (%)" :info="`${defs.quiz_completion} ${defs.mean_latest_score} ${defs.pass_rate}`" :table="quizModule.table">
           <HBarChart :categories="quizModule.categories" :full-labels="quizModule.full" :series="quizModule.series" :max="100" unit="%" :tooltip-rows="quizModule.tooltip" />
         </ChartCard>
@@ -208,17 +179,7 @@ function clearFilters() { router.replace({ query: {} }) }
           <CompletionHeatmap :rows="c?.activity_completion ?? []" />
         </ChartCard>
 
-        <ChartCard title="Learning activity by type" subtitle="Recorded activity records in selection" :info="defs.materials_completed" :table="byType.table">
-          <HBarChart :categories="byType.categories" :series="byType.series" :label-width="170" />
-        </ChartCard>
-
-        <ChartCard title="Learner progress distribution" :subtitle="`Enrollments by LMS-reported progress band (n = ${dist?.total ?? 0})`" :info="defs.mean_progress"
-          :table="{ columns: ['Progress band', 'Enrollments'], rows: (dist?.buckets ?? []).map((b) => [b.bucket, b.count]) }">
-          <ColumnChart :categories="(dist?.buckets ?? []).map((b) => b.bucket)" :data="(dist?.buckets ?? []).map((b) => b.count)" series-name="Enrollments" :total="dist?.total" color="#1baf7a" />
-          <template v-if="dist?.missing" #footer>{{ dist.missing }} enrollments have no reported progress and are excluded.</template>
-        </ChartCard>
-
-        <ChartCard title="Learner-by-module progress" subtitle="LMS-reported progress — select a cell to open that learner's activity matrix" :info="defs.mean_progress">
+        <ChartCard title="Learner-by-module progress" subtitle="LMS-reported progress — select a cell to open that learner's activity matrix" :info="defs.mean_progress" class="lg:col-span-2">
           <StateBlock :empty="(c?.learner_module_matrix.rows.length ?? 0) === 0" height="10rem">
             <LearnerModuleHeatmap v-if="c" :matrix="c.learner_module_matrix" />
           </StateBlock>

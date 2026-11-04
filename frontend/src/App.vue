@@ -3,7 +3,6 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { logout, session } from './api/client'
 import Icon from './components/common/Icon.vue'
-import { dateTime } from './utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -51,12 +50,7 @@ async function signOut() {
         </nav>
 
         <div class="ml-auto flex items-center gap-2">
-          <span
-            v-if="session.user?.temporary"
-            class="hidden items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 ring-1 ring-amber-200 lg:inline-flex"
-            :title="session.user.expires_at ? `Temporary access expires ${dateTime(session.user.expires_at)}` : 'Temporary access'"
-          ><Icon name="clock" :size="13" />Temporary review access<span v-if="session.user.expires_at"> · until {{ dateTime(session.user.expires_at, false) }}</span></span>
-          <div class="flex items-center gap-2 border-l border-line pl-3">
+          <div class="flex items-center gap-2">
             <span class="font-heading grid h-8 w-8 place-items-center rounded-full bg-brand-soft text-[11px] font-semibold text-brand" aria-hidden="true">{{ initials }}</span>
             <span class="hidden max-w-40 truncate text-[13px] font-medium text-ink-2 lg:inline">{{ session.user?.name }}</span>
           </div>
