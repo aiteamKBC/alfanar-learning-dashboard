@@ -50,22 +50,12 @@ const k = computed(() => summary.data.value?.kpis)
 const defs = computed(() => summary.data.value?.definitions ?? charts.data.value?.definitions ?? {})
 const courseName = computed(() => filters.data.value?.courses.find((c) => String(c.course_id) === course.value)?.title)
 
-const engagementCards = computed(() => {
-  const x = k.value
-  if (!x) return []
-  return [
-    { label: 'Learners with activity', icon: 'pulse', tone: 'teal' as const, featured: true, value: pct(x.active_learners.pct), meter: x.active_learners.pct, sub: `${ratio(x.active_learners.value ?? 0, x.active_learners.denominator ?? 0)} learners have recorded activity`, info: defs.value.active_learners },
-    { label: 'Mean LMS progress', icon: 'gauge', tone: 'teal' as const, value: pct(x.mean_progress.value), meter: x.mean_progress.value, sub: `Median ${pct(x.mean_progress.median)} · ${num(x.mean_progress.n)} enrollments`, info: defs.value.mean_progress },
-    { label: 'Completed materials', icon: 'book', tone: 'navy' as const, value: num(x.materials_completed.value), meter: x.materials_completed.pct, sub: `${pct(x.materials_completed.pct)} of ${num(x.materials_completed.denominator)} possible lesson completions`, info: `${defs.value.materials_completed} ${defs.value.lesson_coverage}` },
-    { label: 'Activity coverage', icon: 'coverage', tone: 'navy' as const, value: pct(x.activity_coverage.pct), meter: x.activity_coverage.pct, sub: `${ratio(x.activity_coverage.value ?? 0, x.activity_coverage.denominator ?? 0)} enrollments with recorded activity`, info: defs.value.activity_coverage },
-  ]
-})
-const achievementCards = computed(() => {
+const kpiCards = computed(() => {
   const x = k.value
   if (!x) return []
   const status = Object.entries(x.submissions.by_status ?? {}).map(([s, n]) => `${n} ${s}`).join(' · ')
   return [
-    { label: 'Quiz completion', icon: 'quiz', tone: 'blue' as const, accent: '#2a78d6', value: pct(x.quiz_completion.pct), meter: x.quiz_completion.pct, sub: `${ratio(x.quiz_completion.value ?? 0, x.quiz_completion.denominator ?? 0)} learner-quiz pairs attempted`, info: defs.value.quiz_completion },
+    { label: 'Mean LMS progress', icon: 'gauge', tone: 'teal' as const, value: pct(x.mean_progress.value), meter: x.mean_progress.value, sub: `Median ${pct(x.mean_progress.median)} · ${num(x.mean_progress.n)} enrollments`, info: defs.value.mean_progress },
     { label: 'Mean latest quiz score', icon: 'target', tone: 'blue' as const, accent: '#2a78d6', value: pct(x.mean_latest_score.value), meter: x.mean_latest_score.value, sub: `Latest graded attempt across ${num(x.mean_latest_score.n)} quizzes`, info: defs.value.mean_latest_score },
     { label: 'Quiz pass rate', icon: 'award', tone: 'blue' as const, accent: '#2a78d6', value: pct(x.pass_rate.pct), meter: x.pass_rate.pct, sub: `${ratio(x.pass_rate.value ?? 0, x.pass_rate.denominator ?? 0)} latest attempts passed`, info: defs.value.pass_rate },
     { label: 'Assignment submissions', icon: 'upload', tone: 'neutral' as const, accent: '#6b7489', value: num(x.submissions.value), meter: x.assignment_coverage.pct, sub: `${status || 'none'} · ${pct(x.assignment_coverage.pct)} of possible`, info: `${defs.value.submissions} ${defs.value.assignment_coverage}` },
@@ -147,20 +137,12 @@ function clearFilters() { router.replace({ query: {} }) }
 
     <!-- KPIs -->
     <StateBlock :loading="summary.loading.value && !summary.data.value" :error="summary.error.value" :empty="k?.enrollments.value === 0" height="9rem" @retry="summary.reload">
-      <div class="grid gap-6 xl:grid-cols-2" :class="{ 'opacity-60 transition-opacity': summary.loading.value }">
-        <section>
-          <h2 class="eyebrow mb-2">Engagement &amp; learning materials</h2>
-          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <KpiCard v-for="card in engagementCards" :key="card.label" v-bind="card" />
-          </div>
-        </section>
-        <section>
-          <h2 class="eyebrow mb-2">Assessment achievement</h2>
-          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <KpiCard v-for="card in achievementCards" :key="card.label" v-bind="card" />
-          </div>
-        </section>
-      </div>
+      <section :class="{ 'opacity-60 transition-opacity': summary.loading.value }">
+        <h2 class="eyebrow mb-2">Key metrics</h2>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiCard v-for="card in kpiCards" :key="card.label" v-bind="card" />
+        </div>
+      </section>
     </StateBlock>
 
     <div class="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-[13px] text-amber-900">
