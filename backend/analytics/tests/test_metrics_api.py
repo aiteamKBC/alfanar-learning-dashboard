@@ -94,6 +94,11 @@ class SummaryMetricTests(ApiTestBase):
         self.assertEqual(by_type, {"quiz": 3, "video": 2, "pdf": 1, "audio": 1, "reading": 1, "assignment": 1})
         self.assertEqual(sum(b["count"] for b in c["progress_distribution"]["buckets"]), 3)
         self.assertEqual(c["progress_distribution"]["missing"], 1)
+        delivered = {m["course_id"]: m["delivered_sessions"] for m in c["module_progress"]}
+        self.assertEqual(delivered, {9001: 1, 9002: 0})  # one video (501) with completions; none in 9002
+        # module-level fact: unaffected by learner filters
+        inactive = self.client.get("/api/dashboard/charts?engagement=inactive").json()
+        self.assertEqual({m["course_id"]: m["delivered_sessions"] for m in inactive["module_progress"]}.get(9002), 0)
         matrix = {r["learner_id"]: r["progress"] for r in c["learner_module_matrix"]["rows"]}
         self.assertEqual(matrix[101], {"9001": 50.0, "9002": 0.0})
 

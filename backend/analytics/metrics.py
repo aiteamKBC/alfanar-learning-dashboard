@@ -42,6 +42,7 @@ DEFINITIONS = {
     "lesson_coverage": "Recorded lesson completions ÷ (enrollments × lessons known for that module).",
     "activity_coverage": "Enrollments with any recorded activity ÷ all enrollments.",
     "recorded_time": "Sum of lesson durations where the LMS recorded start/end times. Rows without a measured duration are excluded (not treated as zero).",
+    "delivered_sessions": "Recorded lecture videos (lecture parts) in this module that at least one learner has completed. The source has no session schedule, so this is a count of delivered recordings, not a share of planned sessions.",
     "attendance": "The export has no scheduled sessions or attendance records (Session # is always 1 and no session IDs exist).",
 }
 
@@ -205,6 +206,17 @@ def summary(course_id=None, engagement=None) -> dict:
     }
 
 
+def delivered_sessions() -> dict[int, int]:
+    """Per course: distinct recorded lecture videos with at least one learner completion.
+
+    A module-level fact (independent of learner filters). The export has no session
+    schedule, so this counts delivered lecture recordings, not planned sessions.
+    """
+    rows = (Activity.objects.filter(kind=ActivityKind.VIDEO, lesson_records__isnull=False)
+            .values("course_id").annotate(n=Count("id", distinct=True)))
+    return {r["course_id"]: r["n"] for r in rows}
+
+
 def charts(course_id=None, engagement=None, activity_type=None) -> dict:
     enrollments, stats = filtered_enrollments(course_id, engagement)
     cat = catalogue()
@@ -212,6 +224,7 @@ def charts(course_id=None, engagement=None, activity_type=None) -> dict:
     by_course = defaultdict(list)
     for e in enrollments:
         by_course[e.course_id].append(e)
+    delivered = delivered_sessions()
     kinds = [activity_type] if activity_type else [k.value for k in ActivityKind]
 
     module_progress, quiz_by_module, completion = [], [], []
@@ -222,6 +235,7 @@ def charts(course_id=None, engagement=None, activity_type=None) -> dict:
             "course_id": c.source_id, "course": c.title, "enrollments": len(ens),
             "active": sum(1 for e in ens if stats[e.id]["has_activity"]),
             "mean_progress": _avg(prog), "median_progress": round(median(prog), 1) if prog else None,
+            "delivered_sessions": delivered.get(cid, 0),
         })
         n_quiz = cat[cid].get("quiz", 0)
         attempted = sum(stats[e.id]["quizzes_attempted"] for e in ens)

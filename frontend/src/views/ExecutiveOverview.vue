@@ -131,7 +131,7 @@ function clearFilters() { router.replace({ query: {} }) }
         </div>
       </div>
       <StateBlock :loading="allModules.loading.value && !allModules.data.value" :error="allModules.error.value" height="11rem" @retry="allModules.reload">
-        <ModuleSnapshot :progress="allModules.data.value?.module_progress ?? []" :quiz="allModules.data.value?.quiz_by_module ?? []" :selected="course" @select="selectModule" />
+        <ModuleSnapshot :progress="allModules.data.value?.module_progress ?? []" :quiz="allModules.data.value?.quiz_by_module ?? []" :selected="course" :delivered-info="allModules.data.value?.definitions.delivered_sessions" @select="selectModule" />
       </StateBlock>
     </section>
 

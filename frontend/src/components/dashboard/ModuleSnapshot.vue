@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ModuleProgress, QuizByModule } from '@/api/types'
+import InfoTip from '@/components/common/InfoTip.vue'
 import ProgressRing from './ProgressRing.vue'
 import { pct } from '@/utils/format'
 
-const props = defineProps<{ progress: ModuleProgress[]; quiz: QuizByModule[]; selected?: string }>()
+const props = defineProps<{ progress: ModuleProgress[]; quiz: QuizByModule[]; selected?: string; deliveredInfo?: string }>()
 defineEmits<{ select: [courseId: number] }>()
 
 const cards = computed(() => props.progress.map((m) => ({ ...m, quiz: props.quiz.find((q) => q.course_id === m.course_id) })))
@@ -22,11 +23,12 @@ const cards = computed(() => props.progress.map((m) => ({ ...m, quiz: props.quiz
       @click="$emit('select', m.course_id)"
     >
       <div class="flex items-start gap-4">
-        <ProgressRing :value="m.mean_progress" :label="`Mean LMS progress ${pct(m.mean_progress)}`" />
+        <ProgressRing :count="m.delivered_sessions" caption="sessions" :label="`${m.delivered_sessions} delivered sessions`" />
         <div class="min-w-0 flex-1">
-          <div class="eyebrow">Module</div>
+          <div class="eyebrow flex items-center gap-1">Delivered sessions
+            <InfoTip v-if="deliveredInfo" :text="deliveredInfo" label="About delivered sessions" />
+          </div>
           <h3 class="mt-0.5 line-clamp-2 text-[14px] font-semibold leading-snug text-ink">{{ m.course }}</h3>
-          <p class="mt-1 text-[11.5px] text-ink-3">Mean LMS progress · median {{ pct(m.median_progress) }}</p>
         </div>
       </div>
       <dl class="mt-4 grid grid-cols-3 gap-2 border-t border-line pt-3 text-[11.5px]">
@@ -44,8 +46,8 @@ const cards = computed(() => props.progress.map((m) => ({ ...m, quiz: props.quiz
         </div>
       </dl>
       <div class="mt-3">
-        <div class="flex justify-between text-[11px] text-ink-3"><span>Quiz completion</span><span class="tabular">{{ pct(m.quiz?.completion_pct) }}</span></div>
-        <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-subtle"><div class="h-full rounded-full bg-series-1" :style="{ width: `${m.quiz?.completion_pct ?? 0}%` }" /></div>
+        <div class="flex justify-between text-[11px] text-ink-3"><span>Mean LMS progress</span><span class="tabular">{{ pct(m.mean_progress) }}</span></div>
+        <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-subtle"><div class="h-full rounded-full bg-series-3" :style="{ width: `${m.mean_progress ?? 0}%` }" /></div>
       </div>
     </button>
   </div>
