@@ -58,8 +58,8 @@ const kpiCards = computed(() => {
     { label: 'Mean LMS progress', icon: 'gauge', tone: 'teal' as const, value: pct(x.mean_progress.value), meter: x.mean_progress.value, sub: `Median ${pct(x.mean_progress.median)} · ${num(x.mean_progress.n)} enrollments`, info: defs.value.mean_progress },
     x.attendance.available
       ? { label: 'Live attendance', icon: 'users', tone: 'navy' as const, accent: '#142c52', value: pct(x.attendance.pct), meter: x.attendance.pct,
-          sub: `${ratio(x.attendance.attended, x.attendance.expected)} learner-sessions · ${num(x.attendance.delivered_sessions)} delivered sessions · ${hours(x.attendance.live_seconds)} live`,
-          info: `${defs.value.attendance} ${x.attendance.enrollments_without_teams_identity} of ${x.attendance.enrollments_covered} covered enrollments have no matched Teams identity and count as not attended.` }
+          sub: `${ratio(x.attendance.attended, x.attendance.expected)} learner-sessions · ${num(x.attendance.delivered_sessions)} Teams sessions · ${hours(x.attendance.live_seconds)} live`,
+          info: `${defs.value.attendance} ${x.attendance.enrollments_without_teams_identity} of ${x.attendance.enrollments_covered} covered enrollments (${x.attendance.learners_without_teams_identity} learners) have no matched Teams identity: attendance unknown, excluded from this figure.` }
       : { label: 'Live attendance', icon: 'users', tone: 'neutral' as const, value: 'Not available', sub: 'No mapped Microsoft Teams meeting for this selection', info: defs.value.attendance },
     { label: 'Mean latest quiz score', icon: 'target', tone: 'blue' as const, accent: '#2a78d6', value: pct(x.mean_latest_score.value), meter: x.mean_latest_score.value, sub: `Latest graded attempt across ${num(x.mean_latest_score.n)} quizzes`, info: defs.value.mean_latest_score },
     { label: 'Quiz pass rate', icon: 'award', tone: 'blue' as const, accent: '#2a78d6', value: pct(x.pass_rate.pct), meter: x.pass_rate.pct, sub: `${ratio(x.pass_rate.value ?? 0, x.pass_rate.denominator ?? 0)} latest attempts passed`, info: defs.value.pass_rate },
@@ -136,7 +136,7 @@ function clearFilters() { router.replace({ query: {} }) }
         </div>
       </div>
       <StateBlock :loading="allModules.loading.value && !allModules.data.value" :error="allModules.error.value" height="11rem" @retry="allModules.reload">
-        <ModuleSnapshot :progress="allModules.data.value?.module_progress ?? []" :quiz="allModules.data.value?.quiz_by_module ?? []" :selected="course" :delivered-info="allModules.data.value?.definitions.delivered_sessions" @select="selectModule" />
+        <ModuleSnapshot :progress="allModules.data.value?.module_progress ?? []" :quiz="allModules.data.value?.quiz_by_module ?? []" :selected="course" :delivered-info="allModules.data.value?.definitions.delivered_lectures" @select="selectModule" />
       </StateBlock>
     </section>
 
@@ -149,19 +149,6 @@ function clearFilters() { router.replace({ query: {} }) }
         </div>
       </section>
     </StateBlock>
-
-    <div v-if="k" class="flex items-start gap-3 rounded-xl border border-line bg-white/70 px-4 py-3 text-[13px] text-ink-2">
-      <Icon name="info" :size="16" class="mt-0.5 shrink-0 text-navy" />
-      <p>
-        <span class="font-semibold text-ink">Attendance source: Microsoft Teams export</span>
-        <template v-if="k.attendance.available"> — verified learners matched by exact email; trainers, organisers and external participants excluded.</template>
-        <template v-if="k.attendance.modules_without_data.length">
-          <span class="font-medium text-amber-800">
-            Not available for {{ k.attendance.modules_without_data.map((id) => filters.data.value?.courses.find((c) => c.course_id === id)?.title ?? id).join(', ') }}
-          </span> — no Teams meeting is mapped to {{ k.attendance.modules_without_data.length === 1 ? 'this module' : 'these modules' }}.
-        </template>
-      </p>
-    </div>
 
     <!-- Charts -->
     <StateBlock :loading="charts.loading.value && !charts.data.value" :error="charts.error.value" :empty="(c?.module_progress.length ?? 0) === 0" height="24rem" @retry="charts.reload">

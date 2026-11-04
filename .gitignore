@@ -3,6 +3,8 @@
 .env.*
 !.env.example
 *.pem
+*.key
+*.p12
 *service-account*.json
 *credentials*.json
 secrets/
@@ -13,15 +15,17 @@ venv/
 __pycache__/
 *.py[cod]
 *.sqlite3
+*.db
 *.sqlite3-journal
 .pytest_cache/
 .coverage
 htmlcov/
 
 # Source data (confidential learner records)
-data/*.xlsx
-data/*.xls
-data/*.csv
+data/
+*.xlsx
+*.xls
+*.csv
 
 # Node / frontend
 node_modules/
@@ -39,6 +43,8 @@ logs/
 
 # Third-party design reference (contains demo/mock learner data) - inspiration only
 design-reference/
+Design Reference/
+[Dd]esign[ -][Rr]eference/
 
 # Generated / local artifacts
 backend/staticfiles/

@@ -67,6 +67,7 @@ function open(id: number) { router.push(`/learners/${id}`) }
                 {{ r.attendance.attended }} / {{ r.attendance.expected }} sessions · {{ hours(r.attendance.live_seconds) }}
               </div>
             </template>
+            <span v-else-if="r.attendance.modules_without_teams_identity" class="text-[12px] text-amber-800" title="No matched Microsoft Teams identity for this learner: attendance unknown, not counted as absent">Unknown · no Teams match</span>
             <span v-else class="text-[12px] text-ink-3" title="No mapped Teams meeting for this learner's modules">Not available</span>
           </td>
           <td class="px-4 py-3 tabular font-medium text-ink">{{ num(r.lessons_completed) }}</td>

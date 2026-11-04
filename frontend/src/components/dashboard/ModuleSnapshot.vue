@@ -24,15 +24,14 @@ const cards = computed(() => props.progress.map((m) => ({ ...m, quiz: props.quiz
     >
       <div class="flex items-start gap-4">
         <ProgressRing
-          :count="m.delivered_sessions" :caption="m.delivered_sessions === null ? 'no Teams data' : 'sessions'"
-          :color="m.delivered_sessions === null ? '#d6d3cb' : '#1baf7a'"
-          :label="m.delivered_sessions === null ? 'Delivered sessions not available' : `${m.delivered_sessions} delivered sessions`" />
+          :count="m.delivered_lectures.count" :caption="m.delivered_lectures.count === null ? 'no data' : 'lectures'"
+          :color="m.delivered_lectures.count === null ? '#d6d3cb' : '#1baf7a'"
+          :label="m.delivered_lectures.count === null ? 'Delivered lectures not available' : `${m.delivered_lectures.count} delivered lectures`" />
         <div class="min-w-0 flex-1">
-          <div class="eyebrow flex items-center gap-1">Delivered sessions
-            <InfoTip v-if="deliveredInfo" :text="deliveredInfo" label="About delivered sessions" />
+          <div class="eyebrow flex items-center gap-1">Delivered Lectures
+            <InfoTip v-if="deliveredInfo" :text="deliveredInfo" label="About delivered lectures" />
           </div>
-          <h3 class="mt-0.5 line-clamp-2 text-[14px] font-semibold leading-snug text-ink">{{ m.course }}</h3>
-        </div>
+          <h3 class="mt-0.5 line-clamp-2 text-[14px] font-semibold leading-snug text-ink">{{ m.course }}</h3>        </div>
       </div>
       <dl class="mt-4 grid grid-cols-3 gap-2 border-t border-line pt-3 text-[11.5px]">
         <div>

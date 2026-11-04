@@ -18,6 +18,7 @@ from statistics import mean, median
 
 from django.db.models import Count, Max, Q, Sum
 
+from .attendance import confirmed
 from .attendance import metrics as att
 
 from .models import (
@@ -240,7 +241,8 @@ def charts(course_id=None, engagement=None, activity_type=None) -> dict:
             "active": sum(1 for e in ens if stats[e.id]["has_activity"]),
             "mean_progress": _avg(prog), "median_progress": round(median(prog), 1) if prog else None,
             # Module-level facts (independent of learner filters):
-            "delivered_sessions": len(index.sessions_by_course[c.source_id]) if index.has_data(c.source_id) else None,
+            "delivered_sessions": (teams_n := len(index.sessions_by_course[c.source_id]) if index.has_data(c.source_id) else None),
+            "delivered_lectures": confirmed.delivered_lectures(c.source_id, teams_n),
             "lecture_recordings": recordings.get(cid, 0),
             "attendance": att.aggregate(index, [(e.learner.source_id, c.source_id) for e in ens]),
         })
@@ -359,6 +361,8 @@ def learner_rollup(enrollment_payloads: list[dict]) -> dict:
             "expected": att_expected if covered else None, "pct": _pct(att_attended, att_expected) if covered else None,
             "live_seconds": sum(a["live_seconds"] for a in covered) if covered else None,
             "modules_covered": len(covered), "modules_total": len(enrollment_payloads),
+            "modules_without_teams_identity": sum(1 for p in enrollment_payloads
+                                                  if p["attendance"].get("teams_identity") is False),
         },
         "modules": len(enrollment_payloads),
         "mean_progress": _avg(prog),
@@ -513,7 +517,7 @@ def module_matrix(enrollment: Enrollment) -> dict:
     learner_sid, course_sid = enrollment.learner.source_id, enrollment.course.source_id
     summary_att = index.enrollment(learner_sid, course_sid)
     attendance = {**summary_att, "sessions": index.sessions_for(learner_sid, course_sid) if summary_att["available"] else []}
-    if not summary_att["available"]:
+    if not index.has_data(course_sid):
         attendance["reason"] = ("No Microsoft Teams meeting is mapped to this module, so delivered sessions and "
                                 "attendance are not available.")
     return {

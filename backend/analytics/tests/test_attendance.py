@@ -160,6 +160,47 @@ class AttendanceImportTests(TestCase):
         mods = {m["course_id"]: m["delivered_sessions"] for m in self.client.get("/api/dashboard/charts").json()["module_progress"]}
         self.assertEqual(mods, {9001: 1, 9002: None})
 
+    def test_owner_confirmed_lectures_do_not_change_teams_attendance(self):
+        from unittest import mock
+        from analytics.attendance import confirmed
+        run_attendance_import(self.teams)
+        self.client_login()
+        before = self.client.get("/api/dashboard/summary").json()["kpis"]["attendance"]
+        rows = SessionAttendance.objects.count()
+        cfg = {9001: {"count": 3, "confirmed_by": "Project owner", "confirmed_on": "2026-11-04", "note": "test"}}
+        with mock.patch.dict(confirmed.CONFIRMED_DELIVERED_LECTURES, cfg, clear=True):
+            mods = {m["course_id"]: m for m in self.client.get("/api/dashboard/charts").json()["module_progress"]}
+            after = self.client.get("/api/dashboard/summary").json()["kpis"]["attendance"]
+        a = mods[9001]["delivered_lectures"]
+        self.assertEqual((a["count"], a["source"], a["teams_sessions"], a["differs_from_teams"]), (3, "owner_confirmed", 1, True))
+        self.assertEqual(mods[9001]["delivered_sessions"], 1)    # Teams evidence kept separately
+        b = mods[9002]["delivered_lectures"]
+        self.assertEqual((b["count"], b["source"]), (None, None))  # no Teams data, no confirmation -> not invented
+        self.assertEqual(before, after)                          # attendance unchanged by a display-only confirmation
+        self.assertEqual(SessionAttendance.objects.count(), rows)
+        with mock.patch.dict(confirmed.CONFIRMED_DELIVERED_LECTURES, {}, clear=True):
+            m = {m["course_id"]: m for m in self.client.get("/api/dashboard/charts").json()["module_progress"]}
+        self.assertEqual((m[9001]["delivered_lectures"]["count"], m[9001]["delivered_lectures"]["source"]), (1, "teams"))
+
+    def test_unmatched_learner_is_unknown_not_absent(self):
+        run_attendance_import(self.teams)
+        SessionAttendance.objects.filter(learner_source_id=102).delete()  # 102 now has no matched Teams identity
+        self.client_login()
+        k = self.client.get("/api/dashboard/summary").json()["kpis"]["attendance"]
+        # 102 is excluded from numerator AND denominator (not 1 / 2 = 50%).
+        self.assertEqual((k["attended"], k["expected"], k["pct"]), (1, 1, 100.0))
+        self.assertEqual((k["enrollments_covered"], k["enrollments_measured"]), (2, 1))
+        self.assertEqual((k["enrollments_without_teams_identity"], k["learners_without_teams_identity"]), (1, 1))
+        m = self.client.get("/api/learners/102/courses/9001/matrix").json()["attendance"]
+        self.assertFalse(m["available"])
+        self.assertIs(m["teams_identity"], False)
+        self.assertEqual(m["sessions"], [])                      # no per-session "not recorded" rows
+        self.assertIn("unknown", m["reason"])
+        row = next(r for r in self.client.get("/api/learners").json()["results"] if r["learner_id"] == 102)
+        self.assertFalse(row["attendance"]["available"])
+        self.assertIsNone(row["attendance"]["pct"])
+        self.assertEqual(row["attendance"]["modules_without_teams_identity"], 1)
+
     def test_api_learner_views(self):
         run_attendance_import(self.teams)
         self.client_login()

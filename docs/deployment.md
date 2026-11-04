@@ -16,7 +16,7 @@ Templates are in [`deploy/`](../deploy). Nothing in this repository changes prod
 | API authentication | Anonymous requests to `/api/learners` get 403 | `curl -s -o /dev/null -w '%{http_code}' https://<domain>/api/learners` returns `403` |
 | Database | `DATABASE_URL=postgres://…`, migrations applied, backups scheduled | `manage.py showmigrations analytics`; `pg_dump` cron |
 | Google credentials | JSON key at `/etc/alfanar-dashboard/google-sa.json`, owned by `alfanar`, mode `600`, **not** in the repo or web root | `ls -l /etc/alfanar-dashboard/` |
-| Frontend | `npm ci && npm run build` → nginx serves `frontend/dist`; SPA fallback to `index.html` | Deep link `https://<domain>/learners/744` loads |
+| Frontend | `npm ci && npm run build` → nginx serves `frontend/dist`; SPA fallback to `index.html` | Deep link `https://<domain>/learners/<learner-id>` loads |
 | Admin static | `manage.py collectstatic` → `/static/` | `/admin/login/` is styled |
 | Exactly one scheduler | `alfanar-sync.service` enabled on **one** host; no cron job also calling `sync_alfanar` | `systemctl status alfanar-sync`; `crontab -l` for all users; the lock file rejects a second copy |
 | Restart/recovery | Both units `Restart=on-failure` and `enable`d; a failed sync keeps the last good dataset | `systemctl kill alfanar-sync` → it restarts; `/api/sync/status` |

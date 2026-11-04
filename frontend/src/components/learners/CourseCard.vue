@@ -43,6 +43,7 @@ defineEmits<{ select: [] }>()
         <span>Live attendance</span>
         <span class="tabular">
           <template v-if="course.attendance.available">{{ course.attendance.attended }} / {{ course.attendance.delivered }} · {{ pct(course.attendance.pct) }}</template>
+          <template v-else-if="course.attendance.teams_identity === false">Unknown · no Teams match</template>
           <template v-else>Not available</template>
         </span>
       </div>

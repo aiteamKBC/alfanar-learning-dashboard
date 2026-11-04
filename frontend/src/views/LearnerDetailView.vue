@@ -93,6 +93,8 @@ const materialsSub = computed(() => Object.entries(lessonsByType.value).filter((
             :value="pct(s.attendance.pct)" :meter="s.attendance.pct"
             :sub="`${s.attendance.attended} / ${s.attendance.expected} delivered sessions · ${hours(s.attendance.live_seconds)} live · ${s.attendance.modules_covered} of ${s.attendance.modules_total} modules have Teams data`"
             :info="defs.attendance" />
+          <KpiCard v-else-if="s.attendance.modules_without_teams_identity" label="Live attendance" icon="users" tone="neutral" value="Unknown"
+            sub="No matched Microsoft Teams identity for this learner — not counted as absent" :info="defs.attendance" />
           <KpiCard v-else label="Live attendance" icon="users" tone="neutral" value="Not available" sub="No mapped Microsoft Teams meeting for this learner's modules" :info="defs.attendance" />
         </div>
 

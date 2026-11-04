@@ -6,7 +6,8 @@ Definitions (exposed to the UI):
 * Attended: a verified learner's merged presence in a delivered session is at
   least TEAMS_MIN_ATTENDANCE_MINUTES.
 * Attendance % for an enrollment = attended delivered sessions / delivered
-  sessions of that module. Only available for modules with a mapped Teams meeting.
+  sessions of that module. Only available for modules with a mapped Teams meeting and
+  learners with a matched Teams identity; unmatched learners are unknown, not absent.
 * Live hours = merged recorded presence in delivered sessions.
 """
 
@@ -25,9 +26,14 @@ def definitions() -> dict:
         "delivered_sessions": f"Teams lecture occurrences (one meeting series on one date) for the module that at least {n} "
                               f"verified learners attended for {m}+ minutes. Brief link-opens and test calls are excluded. "
                               "Counts only meetings present in the imported Teams export.",
+        "delivered_lectures": "Lectures delivered in the module. Uses the count confirmed by the project owner where one "
+                              "exists; otherwise the number of delivered Teams sessions. Not available for modules with "
+                              "neither. Attendance is always calculated on the imported Teams sessions.",
         "attendance": f"Delivered sessions attended (merged Teams presence of at least {m} minutes) ÷ delivered sessions of the "
-                      "module. Learners are matched by exact email; trainers, organisers, external and unmatched participants are "
-                      "excluded. Not available for modules without a mapped Teams meeting.",
+                      "module, counted only for learners with a matched Teams identity (exact email or verified alias). "
+                      "Learners with no matched identity are shown as unknown and excluded from numerator and denominator, "
+                      "not counted as absent. Trainers, organisers and external participants are excluded. "
+                      "Not available for modules without a mapped Teams meeting.",
         "live_hours": "Total merged Microsoft Teams presence in delivered sessions (overlapping joins from several devices counted once).",
     }
 
@@ -68,6 +74,12 @@ class AttendanceIndex:
         if not delivered:
             return {"available": False, "delivered": None, "attended": None, "pct": None, "live_seconds": None,
                     "reason": "No mapped Microsoft Teams meeting with delivered sessions for this module"}
+        if learner_sid not in self.identified:
+            # Unknown, not absent: the learner may have joined under an unregistered email.
+            return {"available": False, "delivered": delivered, "attended": None, "pct": None, "live_seconds": None,
+                    "teams_identity": False,
+                    "reason": "No matched Microsoft Teams identity for this learner, so attendance is unknown "
+                              "(not counted as absent). A verified email alias would resolve it."}
         e = self.per_enrollment.get((learner_sid, course_sid), {"attended": 0, "seconds": 0})
         return {"available": True, "delivered": delivered, "attended": e["attended"],
                 "pct": _pct(e["attended"], delivered), "live_seconds": e["seconds"],
@@ -92,19 +104,22 @@ class AttendanceIndex:
 def aggregate(index: AttendanceIndex, pairs: list[tuple[int, int]]) -> dict:
     """Totals over (learner_sid, course_sid) enrollments; only enrollments in modules with Teams data count."""
     covered = [(l, c) for l, c in pairs if index.has_data(c)]
-    attended = sum(index.per_enrollment.get(p, {}).get("attended", 0) for p in covered)
-    expected = sum(len(index.sessions_by_course[c]) for _, c in covered)
-    seconds = sum(index.per_enrollment.get(p, {}).get("seconds", 0) for p in covered)
+    # Only learners with a matched Teams identity are measured. Unmatched learners are unknown, not absent,
+    # so they are excluded from both numerator and denominator and reported separately.
+    measured = [(l, c) for l, c in covered if l in index.identified]
+    unmatched = [(l, c) for l, c in covered if l not in index.identified]
+    attended = sum(index.per_enrollment.get(p, {}).get("attended", 0) for p in measured)
+    expected = sum(len(index.sessions_by_course[c]) for _, c in measured)
+    seconds = sum(index.per_enrollment.get(p, {}).get("seconds", 0) for p in measured)
     courses = {c for _, c in pairs}
     return {
-        "available": bool(covered),
+        "available": bool(measured),
         "attended": attended, "expected": expected, "pct": _pct(attended, expected),
         "live_seconds": seconds,
         "delivered_sessions": sum(len(index.sessions_by_course.get(c, [])) for c in courses),
-        "enrollments_covered": len(covered), "enrollments_total": len(pairs),
-        # Covered enrollments whose learner has no matched Teams identity at all (counted as not attended;
-        # they may have joined under an unregistered email -> add verified aliases to resolve).
-        "enrollments_without_teams_identity": sum(1 for l, _ in covered if l not in index.identified),
+        "enrollments_covered": len(covered), "enrollments_measured": len(measured), "enrollments_total": len(pairs),
+        "enrollments_without_teams_identity": len(unmatched),
+        "learners_without_teams_identity": len({l for l, _ in unmatched}),
         "modules_without_data": sorted(c for c in courses if not index.has_data(c)),
     }
 

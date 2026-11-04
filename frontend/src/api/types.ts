@@ -18,7 +18,16 @@ export interface Summary {
   definitions: Definitions
 }
 
-export interface ModuleProgress { course_id: number; course: string; enrollments: number; active: number; mean_progress: number | null; median_progress: number | null; delivered_sessions: number | null; lecture_recordings: number; attendance: AttendanceAggregate }
+export interface DeliveredLectures {
+  count: number | null
+  source: 'owner_confirmed' | 'teams' | null
+  teams_sessions: number | null
+  differs_from_teams: boolean
+  confirmed_by?: string
+  confirmed_on?: string
+  note?: string
+}
+export interface ModuleProgress { course_id: number; course: string; enrollments: number; active: number; mean_progress: number | null; median_progress: number | null; delivered_sessions: number | null; delivered_lectures: DeliveredLectures; lecture_recordings: number; attendance: AttendanceAggregate }
 export interface QuizByModule { course_id: number; course: string; known_quizzes: number; attempted_pairs: number; possible_pairs: number; completion_pct: number | null; mean_latest_score: number | null; pass_rate_pct: number | null }
 export interface CompletionCell { completed: number; possible: number; known_items: number; pct: number | null }
 export interface ActivityCompletion { course_id: number; course: string; by_type: Record<string, CompletionCell> }
@@ -170,8 +179,10 @@ export interface AttendanceAggregate {
   live_seconds: number
   delivered_sessions: number
   enrollments_covered: number
+  enrollments_measured: number
   enrollments_total: number
   enrollments_without_teams_identity: number
+  learners_without_teams_identity: number
   modules_without_data: number[]
 }
 export interface EnrollmentAttendance {
@@ -191,6 +202,7 @@ export interface RollupAttendance {
   live_seconds: number | null
   modules_covered: number
   modules_total: number
+  modules_without_teams_identity: number
 }
 export interface LiveSession {
   number: number
