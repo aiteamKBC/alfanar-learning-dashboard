@@ -1,0 +1,23 @@
+# /etc/systemd/system/alfanar-sync.service  (template)
+# Exactly ONE scheduler: run this unit on one host only. The command also takes an
+# exclusive lock file, so a second copy exits instead of syncing twice.
+[Unit]
+Description=Alfanar Google Sheets read-only sync (every 5 minutes)
+After=network-online.target alfanar-api.service
+Wants=network-online.target
+
+[Service]
+User=alfanar
+Group=alfanar
+WorkingDirectory=/opt/alfanar-learning-dashboard/backend
+EnvironmentFile=/etc/alfanar-dashboard/env
+Environment=SYNC_LOCK_FILE=/run/alfanar-sync/scheduler.lock
+RuntimeDirectory=alfanar-sync
+ExecStart=/opt/alfanar-learning-dashboard/.venv/bin/python manage.py run_sync_scheduler --source google --interval 300
+Restart=on-failure
+RestartSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,19 @@
+# /etc/systemd/system/alfanar-api.service  (template - review paths/user before installing)
+[Unit]
+Description=Alfanar Learning Dashboard API (gunicorn)
+After=network.target postgresql.service
+
+[Service]
+User=alfanar
+Group=alfanar
+WorkingDirectory=/opt/alfanar-learning-dashboard/backend
+EnvironmentFile=/etc/alfanar-dashboard/env
+ExecStart=/opt/alfanar-learning-dashboard/.venv/bin/gunicorn config.wsgi:application --bind 127.0.0.1:8001 --workers 3 --timeout 60 --access-logfile -
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

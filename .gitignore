@@ -1,0 +1,50 @@
+# Secrets & local config
+.env
+.env.*
+!.env.example
+*.pem
+*service-account*.json
+*credentials*.json
+secrets/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.sqlite3-journal
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Source data (confidential learner records)
+data/*.xlsx
+data/*.xls
+data/*.csv
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Scheduler lock / local logs
+*.lock
+logs/
+
+# Third-party design reference (contains demo/mock learner data) - inspiration only
+design-reference/
+
+# Generated / local artifacts
+backend/staticfiles/
+*.sqlite3-*
+*.bak
+*.dump
+*.zip
+pw*.txt
+*password*
