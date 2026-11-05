@@ -20,6 +20,7 @@ from django.db.models import Count, Max, Q, Sum
 
 from .attendance import confirmed
 from .attendance import metrics as att
+from .course_labels import course_order_key
 
 from .models import (
     LESSON_KINDS, Activity, ActivityKind, Course, Enrollment, LessonRecord, QuizAttempt,
@@ -237,7 +238,7 @@ def charts(course_id=None, engagement=None, activity_type=None) -> dict:
     kinds = [activity_type] if activity_type else [k.value for k in ActivityKind]
 
     module_progress, quiz_by_module, completion = [], [], []
-    for cid, ens in sorted(by_course.items(), key=lambda kv: courses[kv[0]].display_title):
+    for cid, ens in sorted(by_course.items(), key=lambda kv: courses[kv[0]].display_order_key):
         c = courses[cid]
         prog = [e.progress_pct for e in ens if e.progress_pct is not None]
         module_progress.append({
@@ -295,7 +296,7 @@ def charts(course_id=None, engagement=None, activity_type=None) -> dict:
 
     # Learner x module progress matrix
     module_cols = [{"course_id": courses[cid].source_id, "course": courses[cid].display_title}
-                   for cid in sorted(by_course, key=lambda c: courses[c].display_title)]
+                   for cid in sorted(by_course, key=lambda c: courses[c].display_order_key)]
     rows = defaultdict(dict)
     names = {}
     for e in enrollments:
@@ -421,7 +422,7 @@ def learner_directory(search=None, course_id=None, engagement=None, ordering="na
         rows.append({
             "learner_id": l.source_id, "name": l.name,
             "enrollments": [{"course_id": p["course_id"], "course": p["course"], "progress_pct": p["progress_pct"]}
-                            for p in sorted(payloads, key=lambda p: p["course"])],
+                            for p in sorted(payloads, key=lambda p: course_order_key(p["course_id"], p["course"]))],
             **roll,
         })
 
@@ -448,7 +449,8 @@ def learner_detail(learner) -> dict:
     stats = enrollment_stats(e.id for e in enrollments)
     cat = catalogue()
     index = att.AttendanceIndex()
-    payloads = sorted((enrollment_payload(e, stats[e.id], cat, index) for e in enrollments), key=lambda p: p["course"])
+    payloads = sorted((enrollment_payload(e, stats[e.id], cat, index) for e in enrollments),
+                      key=lambda p: course_order_key(p["course_id"], p["course"]))
     return {
         "learner": {"learner_id": learner.source_id, "name": learner.name, "email": learner.email},
         "summary": learner_rollup(payloads),

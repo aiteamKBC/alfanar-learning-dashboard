@@ -47,6 +47,26 @@ class CourseDisplayTests(TestCase):
             self.assertEqual(course.title, f'Upstream title {sid}')
             self.assertEqual(map_subject(course.title, {sid:course.title})[0], sid)
 
+    def test_module_order_is_consistent_in_filters_charts_directory_profiles_and_matrix(self):
+        expected = [83334, 121642, 135945, 154268]
+        self.assertEqual([c['course_id'] for c in self.client.get('/api/filters').json()['courses']], expected)
+        charts = self.client.get('/api/dashboard/charts').json()
+        for key in ('module_progress', 'quiz_by_module', 'activity_completion'):
+            self.assertEqual([c['course_id'] for c in charts[key]], expected)
+        self.assertEqual([c['course_id'] for c in charts['learner_module_matrix']['modules']], expected)
+        directory = self.client.get('/api/learners').json()['results'][0]
+        self.assertEqual([c['course_id'] for c in directory['enrollments']], expected)
+        for url in ('/api/learners/101', '/api/learners/101/courses'):
+            self.assertEqual([c['course_id'] for c in self.client.get(url).json()['courses']], expected)
+        filtered = self.client.get('/api/dashboard/charts?course=121642').json()
+        self.assertEqual([c['course_id'] for c in filtered['module_progress']], [121642])
+
+    def test_other_courses_follow_known_modules_in_alphabetical_order(self):
+        modules = [Course(source_id=9002, title='Zulu'), Course(source_id=154268, title='Original'),
+                   Course(source_id=9001, title='Alpha'), Course(source_id=83334, title='Original')]
+        self.assertEqual([c.source_id for c in sorted(modules, key=lambda c:c.display_order_key)],
+                         [83334,154268,9001,9002])
+
     def test_display_names_survive_source_title_changes_and_repeat_google_sync(self):
         tables = deepcopy(build_tables())
         remap = {9001:83334, 9002:121642}

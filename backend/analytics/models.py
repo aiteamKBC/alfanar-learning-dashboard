@@ -59,6 +59,12 @@ class Course(models.Model):
 
         return course_display_name(self.source_id, self.title)
 
+    @property
+    def display_order_key(self):
+        from .course_labels import course_order_key
+
+        return course_order_key(self.source_id, self.display_title)
+
     def __str__(self):
         return self.display_title
 
