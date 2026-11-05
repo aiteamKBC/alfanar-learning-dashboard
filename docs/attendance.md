@@ -5,11 +5,13 @@ The four owner-supplied module workbooks in `ATTENDANCE_DIRECTORY` (default `dat
 | Workbook | Worksheet | LMS course ID | Dated sessions | Lectures displayed |
 |---|---|---:|---:|---:|
 | Advanced Project and Logistics Management.xlsx | Advanced Project | 154268 | 9 | **12 owner confirmed** |
-| Andrew Operations and Information Management for Project Managers.xlsx | PCP Alfnar | 135945 | 14 | 14 from attendance evidence |
-| PCP Al-Fanar 2025.xlsx | PCP Al-Fanar 2025 | 83334 | 16 | 16 from attendance evidence |
-| Risk Management.xlsx | Risk Management | 121642 | 12 | 12 from attendance evidence |
+| Andrew Operations and Information Management for Project Managers.xlsx | PCP Alfnar | 135945 | 14 | **16 owner confirmed** |
+| PCP Al-Fanar 2025.xlsx | PCP Al-Fanar 2025 | 83334 | 16 | **16 owner confirmed** |
+| Risk Management.xlsx | Risk Management | 121642 | 12 | **14 owner confirmed** |
 
 Operations' worksheet name is misleading; explicit workbook mapping takes precedence. All worksheets, including both supplementary `Unregistered` sheets, are inspected. PCP profile fields, LMS progress, overall attendance columns and fractional `Activity` cells are not session attendance evidence.
+
+All four delivered lecture counts are officially owner-confirmed. The display order remains Planning (83334), Procurement Risk (121642), Operations (135945), Advanced (154268). The confirmed counts are **16, 14, 16, 12**; the separate attendance evidence session counts remain **16, 12, 14, 9**. Confirmations do not add sessions or change attendance numerators, denominators, rates or coverage. Differences remain explained in information tooltips without restoring the removed Overview attendance descriptions.
 
 ## Attendance and coverage
 

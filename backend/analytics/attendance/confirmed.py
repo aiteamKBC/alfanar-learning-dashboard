@@ -1,8 +1,8 @@
 """Delivered-lecture counts confirmed by the project owner.
 
-A confirmed count overrides the Teams-derived count for display only. Teams sessions and attendance
-records are never changed by it: attendance keeps using the imported Teams sessions until the
-specific session dates to exclude are verified.
+A confirmed count overrides the evidence-derived count for display only. Imported sessions and
+attendance records are never changed by it. Attendance continues to use the existing evidence
+sessions and known observations, independently of the official delivered lecture count.
 
 Only add an entry when the count has been confirmed by an accountable person. Never estimate.
 """
@@ -10,6 +10,30 @@ Only add an entry when the count has been confirmed by an accountable person. Ne
 from __future__ import annotations
 
 CONFIRMED_DELIVERED_LECTURES: dict[int, dict] = {
+    # Planning, Controlling and Leading a Project
+    83334: {
+        "count": 16,
+        "confirmed_by": "Project owner",
+        "confirmed_on": "2026-11-05",
+        "note": "16 delivered lectures officially confirmed by the project owner. "
+                "Attendance uses the available evidence sessions and known observations separately.",
+    },
+    # Procurement Risk and Contract Management
+    121642: {
+        "count": 14,
+        "confirmed_by": "Project owner",
+        "confirmed_on": "2026-11-05",
+        "note": "14 delivered lectures officially confirmed by the project owner. "
+                "Attendance uses the available evidence sessions and known observations separately.",
+    },
+    # Operations and Information Management for Project Managers
+    135945: {
+        "count": 16,
+        "confirmed_by": "Project owner",
+        "confirmed_on": "2026-11-05",
+        "note": "16 delivered lectures officially confirmed by the project owner. "
+                "Attendance uses the available evidence sessions and known observations separately.",
+    },
     # Advanced Project and Logistics Management
     154268: {
         "count": 12,

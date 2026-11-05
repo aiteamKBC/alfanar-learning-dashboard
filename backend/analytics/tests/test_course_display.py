@@ -67,6 +67,40 @@ class CourseDisplayTests(TestCase):
         self.assertEqual([c.source_id for c in sorted(modules, key=lambda c:c.display_order_key)],
                          [83334,154268,9001,9002])
 
+    def test_owner_lecture_counts_are_separate_from_attendance_sessions_and_rates(self):
+        import datetime as dt
+        from unittest.mock import patch
+        from analytics.attendance import confirmed
+        from analytics.models import LectureSession, SessionAttendance, TeamsMeeting
+
+        official = {83334:16,121642:14,135945:16,154268:12}
+        evidence = {83334:16,121642:12,135945:14,154268:9}
+        for cid, count in evidence.items():
+            meeting = TeamsMeeting.objects.create(meeting_id=f'synthetic:{cid}', subject=f'Upstream title {cid}',
+                                                  course_source_id=cid, evidence_source='attendance_matrix')
+            for n in range(count):
+                session = LectureSession.objects.create(meeting=meeting, session_date=dt.date(2026,1,n+1),
+                                                         report_count=1, verified_learners=1, delivered=True)
+                SessionAttendance.objects.create(session=session, learner_source_id=101,
+                                                  attended=n % 2 == 0, match_method='email')
+        records = list(SessionAttendance.objects.order_by('id').values())
+        with patch.dict(confirmed.CONFIRMED_DELIVERED_LECTURES, {}, clear=True):
+            before = self.client.get('/api/dashboard/summary').json()
+        after = self.client.get('/api/dashboard/summary').json()
+        self.assertEqual(before,after)
+        rows = self.client.get('/api/dashboard/charts').json()['module_progress']
+        self.assertEqual([r['course_id'] for r in rows], list(official))
+        self.assertEqual({r['course_id']:r['delivered_lectures']['count'] for r in rows}, official)
+        self.assertEqual({r['course_id']:r['delivered_sessions'] for r in rows}, evidence)
+        for row in rows:
+            cid = row['course_id']
+            self.assertEqual(row['delivered_lectures']['source'], 'owner_confirmed')
+            self.assertEqual(row['delivered_lectures']['teams_sessions'], evidence[cid])
+            self.assertEqual(row['attendance']['expected'], evidence[cid])
+            matrix = self.client.get(f'/api/learners/101/courses/{cid}/matrix').json()
+            self.assertEqual(matrix['attendance']['delivered'], evidence[cid])
+        self.assertEqual(records,list(SessionAttendance.objects.order_by('id').values()))
+
     def test_display_names_survive_source_title_changes_and_repeat_google_sync(self):
         tables = deepcopy(build_tables())
         remap = {9001:83334, 9002:121642}

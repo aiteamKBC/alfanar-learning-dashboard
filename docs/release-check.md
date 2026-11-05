@@ -15,7 +15,7 @@ Advanced's module card, filtered attendance KPI and learner attendance views vis
 | PCP | 16 | 308 / 336 | 91.7% | 336 / 416 | 80.8% |
 | Risk | 12 | 247 / 286 | 86.4% | 286 / 324 | 88.3% |
 
-The other three module cards identify their lecture counts as evidence-derived, with total delivery not independently confirmed. Evidence coverage measures completeness of the dated matrix; it is distinct from attendance and from the fraction of confirmed lectures represented. Binary attendance cannot verify duration.
+All four delivered lecture counts are now officially owner-confirmed: Planning 16, Procurement Risk 14, Operations 16 and Advanced 12. The separate attendance evidence session counts remain 16, 12, 14 and 9 in that order. Evidence coverage measures completeness of the dated matrix; it is distinct from attendance and from the fraction of confirmed lectures represented. Binary attendance cannot verify duration.
 
 This release check changes frontend presentation only. Backend source, calculations, identities, analytics database tables, source workbooks and `.env` are checked against a pre-edit baseline. No live sync or attendance import is needed for these UI changes. Tests run in a separate temporary database.
 
