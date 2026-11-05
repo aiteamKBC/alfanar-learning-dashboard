@@ -155,7 +155,8 @@ def _project_path(value: str) -> Path:
     return p if p.is_absolute() else PROJECT_ROOT / p
 
 
-TEAMS_ATTENDANCE_PATH = _project_path(os.environ.get("TEAMS_ATTENDANCE_PATH") or "data/PCP_Al_Fanar_Teams_Original_Data 1.xlsx")
+# The former combined export is comparison-only; default imports require all four module files.
+ATTENDANCE_DIRECTORY = _project_path(os.environ.get("ATTENDANCE_DIRECTORY") or "data")
 # Optional verified aliases (CSV: teams_email,learner_id). Contains emails -> keep under data/ (git-ignored).
 TEAMS_ALIASES_PATH = _project_path(os.environ.get("TEAMS_ALIASES_PATH") or "data/teams_email_aliases.csv")
 # Email domains of the training provider's staff (trainers/organisers), excluded from learner totals.

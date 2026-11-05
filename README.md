@@ -2,7 +2,7 @@
 
 Learning analytics dashboard for Kent Business College. It is built with Django REST Framework, Vue 3, TypeScript, Vite, Tailwind and ECharts.
 
-The data source is the read-only `data/Alfanar Endpoint.xlsx` workbook, with optional read-only Google Sheets sync. See [docs/data-mapping.md](docs/data-mapping.md) for sheet semantics and metric definitions.
+The primary LMS source is read-only Google Sheets; `data/Alfanar Endpoint.xlsx` is an older local snapshot. Attendance comes from four separate owner-supplied module workbooks. See [docs/data-mapping.md](docs/data-mapping.md) for definitions and [docs/attendance.md](docs/attendance.md) for evidence coverage.
 
 ## Prerequisites (Windows)
 
@@ -84,10 +84,11 @@ Tests use a synthetic workbook. If the real workbook is present, they also recon
 
 ## Microsoft Teams attendance
 
-This is a separate, read-only source. The LMS/Google sync never changes it. To refresh it after replacing the export in `data/`:
+This is a separate, read-only source. The LMS/Google sync never changes it. All four authoritative module workbooks must be present in `ATTENDANCE_DIRECTORY` (default `data/`). The previous combined export is comparison-only. Refresh and independently verify with:
 
 ```powershell
 cd backend; ..\.venv\Scripts\python manage.py import_teams_attendance
+..\.venv\Scripts\python manage.py audit_dashboard
 ```
 
 Matching rules, module mappings, the delivered-session rule and known caveats are documented in [docs/attendance.md](docs/attendance.md).
@@ -109,4 +110,4 @@ No endpoint changes learner data.
 
 ## Production
 
-See [docs/deployment.md](docs/deployment.md) for the VPS checklist, install steps and account provisioning, and [deploy/](deploy) for the systemd and nginx templates (production dependencies: `backend/requirements-production.txt`).
+See [docs/presentation-release.md](docs/presentation-release.md) for this release's secure workbook transfer, backup, migration, validation and rollback steps. [docs/deployment.md](docs/deployment.md) covers general installation and accounts; [deploy/](deploy) contains systemd and nginx templates.

@@ -34,17 +34,17 @@ DEFINITIONS = {
     "unique_learners": "Distinct learner IDs enrolled in the selected modules. A learner in several modules is counted once.",
     "modules": "Distinct modules (LMS courses) in the selection.",
     "enrollments": "Learner-module pairs from the Students worksheet.",
-    "active_learners": "Learners with at least one recorded lesson, quiz attempt or assignment submission in the selected modules.",
+    "active_learners": "Active in LMS: learners with at least one recorded lesson, quiz attempt or assignment record (including drafts) in the selected modules. This is recorded LMS activity, not a measure of overall engagement.",
     "mean_progress": "Mean of the LMS-reported course progress (%) across enrollments. This is the LMS figure, not a qualification outcome.",
     "quiz_completion": "Learner-quiz pairs with at least one attempt ÷ (enrollments × quizzes known for that module). Known quizzes are those appearing in the export.",
     "mean_latest_score": "Mean of each learner's latest graded attempt (highest Attempt #) per quiz. Quizzes never attempted are excluded, not counted as zero.",
-    "pass_rate": "Share of attempted learner-quiz pairs whose latest attempt has source status 'passed'. Pass marks are set per quiz by the LMS.",
+    "pass_rate": "Share of graded learner-quiz results whose latest graded attempt has source status 'passed'. Ungraded results are excluded. Pass marks are set per quiz by the LMS.",
     "submissions": "Assignment submission records. 'Submitted' excludes drafts.",
     "assignment_coverage": "Learner-assignment pairs with a non-draft submission ÷ (enrollments × assignments known for that module).",
     "materials_completed": "Recorded completions of videos, PDFs, audio and reading lessons (Lesson Details worksheet).",
     "lesson_coverage": "Recorded lesson completions ÷ (enrollments × lessons known for that module).",
     "activity_coverage": "Enrollments with any recorded activity ÷ all enrollments.",
-    "recorded_time": "Sum of lesson durations where the LMS recorded start/end times. Rows without a measured duration are excluded (not treated as zero).",
+    "recorded_time": "Unverified LMS timer total from lesson start/end records. Long open sessions may include idle time; this is not verified study hours. Missing durations are excluded.",
     "lecture_recordings": "Recorded lecture videos (lecture parts) in this module that at least one learner has completed (LMS).",
 }
 
@@ -85,7 +85,7 @@ def enrollment_stats(enrollment_ids) -> dict[int, dict]:
             "quizzes_attempted": 0, "quiz_scores": [], "quizzes_passed_latest": 0, "quizzes_graded": 0,
             "attempts": 0, "last_attempt": None,
             "submissions": 0, "submitted": 0, "submission_status": defaultdict(int),
-            "assignments_submitted": 0, "grades": [],
+            "assignments_submitted": 0, "grades": [], "last_submission": None,
         }
         for eid in ids
     }
@@ -120,8 +120,10 @@ def enrollment_stats(enrollment_ids) -> dict[int, dict]:
 
     submitted_pairs = defaultdict(set)
     for r in Submission.objects.filter(enrollment_id__in=ids).values(
-            "enrollment_id", "activity_id", "status", "grade"):
+            "enrollment_id", "activity_id", "status", "grade", "updated_at"):
         s = stats[r["enrollment_id"]]
+        if r['updated_at'] and (s['last_submission'] is None or r['updated_at'] > s['last_submission']):
+            s['last_submission'] = r['updated_at']
         s["submissions"] += 1
         s["submission_status"][r["status"] or "unknown"] += 1
         if r["status"] != "draft":
@@ -135,7 +137,7 @@ def enrollment_stats(enrollment_ids) -> dict[int, dict]:
     for s in stats.values():
         s["lesson_total"] = sum(s["lessons"].values())
         s["has_activity"] = bool(s["lesson_total"] or s["attempts"] or s["submissions"])
-        last = [d for d in (s["last_lesson"], s["last_attempt"]) if d]
+        last = [d for d in (s["last_lesson"], s["last_attempt"], s["last_submission"]) if d]
         s["last_activity"] = max(last) if last else None
     return stats
 
@@ -146,10 +148,11 @@ def filtered_enrollments(course_id=None, engagement=None):
         qs = qs.filter(course__source_id=course_id)
     enrollments = list(qs)
     stats = enrollment_stats(e.id for e in enrollments)
+    active_ids = {e.learner_id for e in enrollments if stats[e.id]["has_activity"]}
     if engagement == "active":
-        enrollments = [e for e in enrollments if stats[e.id]["has_activity"]]
+        enrollments = [e for e in enrollments if e.learner_id in active_ids]
     elif engagement == "inactive":
-        enrollments = [e for e in enrollments if not stats[e.id]["has_activity"]]
+        enrollments = [e for e in enrollments if e.learner_id not in active_ids]
     return enrollments, stats
 
 
@@ -206,7 +209,8 @@ def summary(course_id=None, engagement=None) -> dict:
                                   "pct": _pct(sum(1 for e in enrollments if stats[e.id]["has_activity"]),
                                               len(enrollments))},
             "recorded_time": {"value": agg("lesson_seconds"), "timed_records": agg("lesson_timed"),
-                              "untimed_records": agg("lesson_total") - agg("lesson_timed"), "unit": "seconds"},
+                              "untimed_records": agg("lesson_total") - agg("lesson_timed"), "unit": "seconds",
+                              "verified": False, "warning": "LMS timers may include idle/open sessions; not verified study hours"},
             "attendance": att.aggregate(att.AttendanceIndex(),
                                         [(e.learner.source_id, e.course.source_id) for e in enrollments]),
         },
@@ -242,7 +246,8 @@ def charts(course_id=None, engagement=None, activity_type=None) -> dict:
             "mean_progress": _avg(prog), "median_progress": round(median(prog), 1) if prog else None,
             # Module-level facts (independent of learner filters):
             "delivered_sessions": (teams_n := len(index.sessions_by_course[c.source_id]) if index.has_data(c.source_id) else None),
-            "delivered_lectures": confirmed.delivered_lectures(c.source_id, teams_n),
+            "delivered_lectures": confirmed.delivered_lectures(c.source_id, teams_n,
+                "attendance_matrix" if any(s["meeting__evidence_source"] == "attendance_matrix" for s in index.sessions_by_course[c.source_id]) else "teams"),
             "lecture_recordings": recordings.get(cid, 0),
             "attendance": att.aggregate(index, [(e.learner.source_id, c.source_id) for e in ens]),
         })
@@ -333,6 +338,7 @@ def enrollment_payload(e: Enrollment, s: dict, cat, index: att.AttendanceIndex |
         "quizzes_known": known_q,
         "quiz_attempts": s["attempts"],
         "mean_latest_score": _avg(s["quiz_scores"]),
+        "latest_score_sum": sum(s["quiz_scores"]),
         "quizzes_passed_latest": s["quizzes_passed_latest"],
         "quizzes_graded": s["quizzes_graded"],
         "assignments_submitted": s["assignments_submitted"],
@@ -350,16 +356,16 @@ def learner_rollup(enrollment_payloads: list[dict]) -> dict:
     prog = [p["progress_pct"] for p in enrollment_payloads if p["progress_pct"] is not None]
     graded = sum(p["quizzes_graded"] for p in enrollment_payloads)
     # pair-level mean of latest scores across all modules
-    total_score = sum((p["mean_latest_score"] or 0) * p["quizzes_graded"] for p in enrollment_payloads)
+    total_score = sum(p["latest_score_sum"] for p in enrollment_payloads)
     last = [p["last_activity"] for p in enrollment_payloads if p["last_activity"]]
     covered = [p["attendance"] for p in enrollment_payloads if p["attendance"]["available"]]
     att_attended = sum(a["attended"] for a in covered)
-    att_expected = sum(a["delivered"] for a in covered)
+    att_expected = sum(a.get("measured", a["delivered"]) for a in covered)
     return {
         "attendance": {
             "available": bool(covered), "attended": att_attended if covered else None,
             "expected": att_expected if covered else None, "pct": _pct(att_attended, att_expected) if covered else None,
-            "live_seconds": sum(a["live_seconds"] for a in covered) if covered else None,
+            "live_seconds": sum(a["live_seconds"] or 0 for a in covered) if any(a['live_seconds'] is not None for a in covered) else None,
             "modules_covered": len(covered), "modules_total": len(enrollment_payloads),
             "modules_without_teams_identity": sum(1 for p in enrollment_payloads
                                                   if p["attendance"].get("teams_identity") is False),
@@ -488,6 +494,9 @@ def module_matrix(enrollment: Enrollment) -> dict:
             latest = ss[-1] if ss else None
             row["assignment"] = None if latest is None else {
                 "status": latest.status, "grade": latest.grade, "updated_at": latest.updated_at,
+                "has_submitted": any(s.status != 'draft' for s in ss),
+                "history": [{"source_id": s.source_id, "number": s.submission_number, "status": s.status,
+                             "grade": s.grade, "updated_at": s.updated_at} for s in ss],
                 "submissions": len(ss)}
             row["recorded"] = latest is not None
         rows.append(row)
@@ -508,7 +517,7 @@ def module_matrix(enrollment: Enrollment) -> dict:
         "video": col("video"), "audio": col("audio"), "pdf": col("pdf"), "reading": col("reading"),
         "assignment": {**col("assignment"),
                        "submitted": sum(1 for r in assignment_rows
-                                        if r.get("assignment") and r["assignment"]["status"] != "draft")},
+                                        if r.get("assignment") and r["assignment"]["has_submitted"])},
         "recorded_seconds": sum((r["lesson"] or {}).get("recorded_seconds") or 0
                                 for r in rows if r.get("lesson")),
     }

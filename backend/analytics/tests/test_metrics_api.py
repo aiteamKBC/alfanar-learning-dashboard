@@ -79,7 +79,9 @@ class SummaryMetricTests(ApiTestBase):
 
     def test_engagement_filter(self):
         k = self.client.get("/api/dashboard/summary?engagement=inactive").json()["kpis"]
-        self.assertEqual(k["enrollments"]["value"], 2)
+        self.assertEqual(k["enrollments"]["value"], 1)
+        directory = self.client.get('/api/learners?engagement=inactive').json()
+        self.assertEqual(k['unique_learners']['value'], directory['count'])
 
     def test_bad_filter_rejected(self):
         self.assertEqual(self.client.get("/api/dashboard/summary?course=abc").status_code, 400)
@@ -106,6 +108,23 @@ class SummaryMetricTests(ApiTestBase):
 
 
 class LearnerApiTests(ApiTestBase):
+    def test_latest_submission_is_included_in_last_lms_activity(self):
+        from django.utils import timezone
+        from analytics.models import Submission
+        stamp = timezone.now().replace(microsecond=0)
+        Submission.objects.filter(enrollment__learner__source_id=101).update(updated_at=stamp)
+        detail = self.client.get('/api/learners/101').json()
+        self.assertEqual(detail['summary']['last_activity'], stamp.isoformat().replace('+00:00','Z'))
+
+    def test_learner_score_rounds_once_across_modules(self):
+        from analytics.models import Activity, Enrollment, QuizResult
+        QuizResult.objects.filter(enrollment__learner__source_id=101).update(latest_score=60.04)
+        enrollment = Enrollment.objects.get(learner__source_id=101,course__source_id=9002)
+        activity = Activity.objects.create(course=enrollment.course,kind='quiz',source_id=901,title='Synthetic rounding quiz')
+        QuizResult.objects.create(enrollment=enrollment,activity=activity,latest_score=66.65,latest_status='passed')
+        detail = self.client.get('/api/learners/101').json()
+        self.assertEqual(detail['summary']['mean_latest_score'], round((60.04+66.65)/2,1))
+
     def test_directory_search_sort_paginate(self):
         r = self.client.get("/api/learners?ordering=-progress&page_size=2").json()
         self.assertEqual(r["count"], 3)

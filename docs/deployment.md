@@ -1,5 +1,7 @@
 # Deployment and access guide (company VPS, Ubuntu)
 
+For the attendance and identity presentation release, follow the complete [presentation release procedure](presentation-release.md), including source packaging, encrypted workbook transfer, checksums, database backup, migration, independent audit and rollback.
+
 Templates are in [`deploy/`](../deploy). Nothing in this repository changes production by itself. Every step below has to be run deliberately by an authorised operator.
 
 ## 1. Pre-deployment checklist

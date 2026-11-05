@@ -4,9 +4,9 @@ During normalization every row of a duplicate account is attributed to the canon
 learner appears once and all of their module progress and activity is kept. The source workbook /
 Google Sheet is never modified; removing an entry and re-syncing restores the separate accounts.
 
-Only add a pair when the identity is verified by evidence (not by a similar name alone). A merge is
-skipped automatically (with a warning) if both accounts hold records for the same lesson or quiz,
-so no activity can be silently dropped. Keep personal names out of this file (public repo).
+Only add a pair when verified by evidence or explicitly approved by the project owner.
+Overlapping academic evidence is retained in AcademicEvidence; summaries count distinct items.
+Keep personal names out of this file (public repo).
 
 Evidence (audit 2026-11-05) for each pair:
 * Duplicate registered in the 2026-04-09 batch with a misspelling of the canonical account's
@@ -23,6 +23,11 @@ MERGED_LEARNER_IDS: dict[int, int] = {
     # Username-style Gmail encoding the canonical corporate address. Its PCP activity (Nov 2025 to
     # Mar 2026) matches the canonical email attending 16 PCP lectures; never co-present in Teams.
     779: 1229,
+    # Explicit owner decisions, 2026-11-05. Canonical IDs have no mapping chains.
+    743: 1229,
+    746: 763,
+    1221: 763,
+    1222: 763,
+    758: 1059,
+    1038: 1059,
 }
-# Not merged (identity not verified): 743 shares a display name with 1229, but its email names a
-# different first name and it was online at the same time as 1229's Teams identity.

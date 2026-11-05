@@ -9,7 +9,7 @@ inside a transaction.
 from __future__ import annotations
 
 from ..models import (
-    Activity, Course, Enrollment, Learner, LessonRecord, QuizAttempt, QuizResult, Submission,
+    AcademicEvidence, Activity, Course, Enrollment, Learner, LearnerIdentity, LessonRecord, QuizAttempt, QuizResult, Submission,
 )
 from .normalize import Dataset
 
@@ -42,6 +42,8 @@ def _upsert(model, key_fields: tuple[str, ...], desired: dict[tuple, dict]) -> t
 
 def load_dataset(ds: Dataset) -> dict:
     stats = {}
+    _, stats["identities"] = _upsert(LearnerIdentity, ("source_id",), {(k,):v for k,v in ds.identities.items()})
+    _, stats["academic_evidence"] = _upsert(AcademicEvidence, ("sheet", "row_number"), ds.evidence)
     course_pk, stats["courses"] = _upsert(Course, ("source_id",), {(k,): v for k, v in ds.courses.items()})
     learner_pk, stats["learners"] = _upsert(Learner, ("source_id",), {(k,): v for k, v in ds.learners.items()})
 

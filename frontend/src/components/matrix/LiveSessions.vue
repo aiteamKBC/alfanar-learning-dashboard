@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { MatrixAttendance } from '@/api/types'
+import type { MatrixAttendance, ModuleProgress } from '@/api/types'
+import AttendanceScope from '@/components/common/AttendanceScope.vue'
 import Icon from '@/components/common/Icon.vue'
 import InfoTip from '@/components/common/InfoTip.vue'
 import { dateTime, duration, hours, pct } from '@/utils/format'
 
 /** Delivered Teams sessions for one learner in one module, with a summary footer. */
-const props = defineProps<{ attendance: MatrixAttendance; definition?: string }>()
+const props = defineProps<{ attendance: MatrixAttendance; definition?: string; module?: ModuleProgress }>()
 const open = ref(true)
 
 const counts = computed(() => {
@@ -14,10 +15,13 @@ const counts = computed(() => {
   return {
     attended: s.filter((x) => x.status === 'attended').length,
     brief: s.filter((x) => x.status === 'brief').length,
-    none: s.filter((x) => x.status === 'not_recorded').length,
+    none: s.filter((x) => x.status === 'not_recorded' || x.status === 'unavailable').length,
+    absent: s.filter((x) => x.status === 'absent').length,
   }
 })
 const STATUS = {
+  absent: { label: 'Recorded absent', cls: 'bg-white text-ink-3 ring-gray-200', icon: '–' },
+  unavailable: { label: 'Not Available', cls: 'bg-amber-50 text-amber-800 ring-amber-200', icon: '–' },
   attended: { label: 'Attended', cls: 'bg-emerald-50 text-emerald-800 ring-emerald-200', icon: '✓' },
   brief: { label: 'Brief join', cls: 'bg-amber-50 text-amber-800 ring-amber-200', icon: '◔' },
   not_recorded: { label: 'Not recorded', cls: 'bg-white text-ink-3 ring-gray-200', icon: '–' },
@@ -30,7 +34,7 @@ function timeOnly(v: string | null) {
 <template>
   <section v-if="!attendance.available" class="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-[13px] text-amber-900">
     <Icon name="info" :size="15" class="mt-0.5 shrink-0" />
-    <span><span class="font-semibold">Live attendance is not available.</span> {{ attendance.reason }}</span>
+    <span><span class="font-semibold">Attendance: Not Available.</span> {{ attendance.reason }}</span>
   </section>
 
   <section v-else class="card overflow-hidden">
@@ -38,17 +42,21 @@ function timeOnly(v: string | null) {
       <span class="flex items-center gap-2">
         <span class="grid h-8 w-8 place-items-center rounded-lg bg-navy-soft text-navy"><Icon name="users" :size="16" /></span>
         <span>
-          <span class="eyebrow flex items-center gap-1">Live sessions · Microsoft Teams <InfoTip v-if="definition" :text="definition" /></span>
-          <span class="font-heading text-[15px] font-semibold text-ink">{{ attendance.attended }} / {{ attendance.delivered }} delivered sessions attended</span>
+          <span class="eyebrow flex items-center gap-1">Attendance evidence <InfoTip v-if="definition" :text="definition" /></span>
+          <span class="font-heading text-[15px] font-semibold text-ink">{{ attendance.attended }} / {{ attendance.measured ?? attendance.delivered }} known sessions attended · {{ attendance.delivered }} dated sessions</span>
         </span>
       </span>
       <span class="font-heading text-[22px] font-semibold text-ink tabular">{{ pct(attendance.pct) }}</span>
-      <span class="text-[12px] text-ink-3">{{ hours(attendance.live_seconds) }} recorded live presence</span>
+      <span class="text-[12px] text-ink-3">{{ attendance.live_seconds === null ? 'Duration: Not Available' : `${hours(attendance.live_seconds)} recorded live presence` }}</span>
       <span v-if="attendance.teams_identity === false" class="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-amber-200">
         No matched Teams identity for this learner
       </span>
       <Icon :name="open ? 'down' : 'chevron'" :size="16" class="ml-auto text-ink-3" />
     </button>
+    <div class="border-b border-line px-4 py-3">
+      <p class="text-[12px] text-ink-2">Learner attendance uses known observations only. Missing attendance is Not Available and excluded from the rate.</p>
+      <AttendanceScope v-if="module" :module="module" />
+    </div>
 
     <div v-if="open" class="matrix-scroll max-h-[420px] overflow-auto">
       <table class="w-full min-w-[760px] border-separate border-spacing-0 text-[13px]">
@@ -71,7 +79,7 @@ function timeOnly(v: string | null) {
                 <span aria-hidden="true">{{ STATUS[s.status].icon }}</span>{{ STATUS[s.status].label }}
               </span>
             </td>
-            <td class="border-b border-line px-3 py-2 tabular" :class="s.presence_seconds === null ? 'text-ink-3' : 'text-ink'">{{ s.presence_seconds === null ? '—' : duration(s.presence_seconds) }}</td>
+            <td class="border-b border-line px-3 py-2 tabular" :class="s.presence_seconds === null ? 'text-ink-3' : 'text-ink'">{{ s.presence_seconds === null ? 'Not Available' : duration(s.presence_seconds) }}</td>
             <td class="border-b border-line px-3 py-2 text-ink-2 tabular">
               <template v-if="s.first_join">{{ timeOnly(s.first_join) }} – {{ timeOnly(s.last_leave) }}<span v-if="(s.joins ?? 0) > 1" class="ml-1 text-[11px] text-ink-3">({{ s.joins }} joins)</span></template>
               <template v-else>—</template>
@@ -81,10 +89,10 @@ function timeOnly(v: string | null) {
         </tbody>
         <tfoot class="sticky bottom-0 bg-[#f6f5f1] text-[12px]">
           <tr class="text-ink">
-            <td class="border-t-2 border-line-strong px-4 py-2.5 font-semibold">{{ attendance.delivered }} delivered</td>
+            <td class="border-t-2 border-line-strong px-4 py-2.5 font-semibold">{{ attendance.delivered }} sessions with evidence</td>
             <td class="border-t-2 border-line-strong px-3 py-2.5" />
-            <td class="border-t-2 border-line-strong px-3 py-2.5 tabular"><b>{{ counts.attended }}</b> attended · {{ counts.brief }} brief · {{ counts.none }} not recorded</td>
-            <td class="border-t-2 border-line-strong px-3 py-2.5 font-semibold tabular">{{ hours(attendance.live_seconds) }}</td>
+            <td class="border-t-2 border-line-strong px-3 py-2.5 tabular"><b>{{ counts.attended }}</b> attended · {{ counts.absent }} absent · {{ counts.brief }} brief · {{ counts.none }} Not Available</td>
+            <td class="border-t-2 border-line-strong px-3 py-2.5 font-semibold tabular">{{ attendance.live_seconds === null ? 'Not Available' : hours(attendance.live_seconds) }}</td>
             <td class="border-t-2 border-line-strong px-3 py-2.5" />
             <td class="border-t-2 border-line-strong px-3 py-2.5 font-semibold tabular">{{ pct(attendance.pct) }}</td>
           </tr>

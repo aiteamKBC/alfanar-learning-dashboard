@@ -125,6 +125,8 @@ def to_datetime(v):
 
 @dataclass
 class Dataset:
+    identities: dict = field(default_factory=dict)
+    evidence: dict = field(default_factory=dict)
     courses: dict = field(default_factory=dict)        # cid -> fields
     learners: dict = field(default_factory=dict)       # uid -> fields
     enrollments: dict = field(default_factory=dict)    # (uid, cid) -> fields
@@ -162,7 +164,7 @@ class Dataset:
         blob = {
             name: sorted(([list(k) if isinstance(k, tuple) else k, v] for k, v in getattr(self, name).items()),
                          key=lambda kv: json.dumps(kv[0]))
-            for name in ("courses", "learners", "enrollments", "activities", "lesson_records",
+            for name in ("identities", "evidence", "courses", "learners", "enrollments", "activities", "lesson_records",
                          "quiz_results", "quiz_attempts", "submissions")
         }
         return hashlib.sha256(json.dumps(blob, default=enc, sort_keys=True).encode()).hexdigest()
@@ -218,7 +220,7 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
     dup_enrol = 0
     excluded: Counter = Counter()  # rows of configured non-learner accounts, per sheet / lesson kind
     excluded_ids: set = set()
-    merges = _applicable_merges(sheets, ds)
+    merges = dict(MERGED_LEARNER_IDS)
     merged: Counter = Counter()      # rows re-attributed from a duplicate account, per sheet
     identities: dict = {}            # raw User ID -> identity (first row)
     enrol_src: dict = {}             # (canonical uid, cid) -> raw User IDs that contributed
@@ -285,6 +287,7 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
     # One learner per canonical ID; the canonical account's own identity wins over a duplicate's.
     for raw, ident in identities.items():
         ds.learners[canon(raw)] = identities.get(canon(raw), ident)
+        ds.identities[raw] = {"canonical_source_id": canon(raw), **ident}
     if not ds.enrollments:
         ds.errors.append("No enrollments found in Students worksheet")
         raise ValidationFailed(ds.errors, ds.warnings)
@@ -346,6 +349,12 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
             key = (uid, cid, str(kind), sid)
             if key in ds.lesson_records:
                 dup += 1
+                prev = ds.lesson_records[key]
+                # One actual representative row, never a fabricated start/end span.
+                # Keep the greatest recorded duration; all original rows remain in evidence.
+                if seconds is not None and (prev['recorded_seconds'] is None or seconds > prev['recorded_seconds']):
+                    ds.lesson_records[key] = {'recorded_seconds': seconds, 'started_at': started,
+                                             'ended_at': ended, 'time_source': time_source}
                 continue
             ds.lesson_records[key] = {
                 "recorded_seconds": seconds,
@@ -357,7 +366,7 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
         except (ValueError, TypeError) as exc:
             bad(sh.title, n, str(exc))
     if dup:
-        ds.warnings.append(f"Lesson Details: {dup} duplicate learner/lesson rows ignored")
+        ds.warnings.append(f"Lesson Details: {dup} duplicate learner/lesson rows reconciled; source evidence retained")
 
     # ---- Quizzes -> quiz activities + quiz results --------------------------------------
     sh = sheets["quizzes"]
@@ -373,6 +382,10 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
             key = (uid, cid, qid)
             if key in ds.quiz_results:
                 dup += 1
+                for field, value in (("attempts_count", to_int(r.get("Attempts Count"))),
+                                     ("best_score", to_float(r.get("Best Progress (%)")))):
+                    vals = [v for v in (ds.quiz_results[key][field], value) if v is not None]
+                    ds.quiz_results[key][field] = max(vals) if vals else None
                 continue
             ds.quiz_results[key] = {
                 "attempts_count": to_int(r.get("Attempts Count")),
@@ -386,6 +399,7 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
     # ---- Quiz Attempts ------------------------------------------------------------------
     sh = sheets["quiz attempts"]
     dup = 0
+    source_attempts = {}
     for n, r in sh.records():
         try:
             uid, cid, qid = _remap(to_int(r.get("User ID")), sh.title), to_int(r.get("Course ID")), to_int(r.get("Quiz ID"))
@@ -395,21 +409,35 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
             if not enrolled(sh.title, uid, cid):
                 continue
             add_activity(cid, ActivityKind.QUIZ, qid, clean_text(r.get("Quiz Title")))
-            key = (uid, cid, qid, num)
-            if key in ds.quiz_attempts:
+            raw_uid = to_int(r.get("User ID"))
+            key = (uid, cid, qid, raw_uid, num)
+            if key in source_attempts:
                 dup += 1
                 continue
             created = to_datetime(r.get("Created At"))
-            ds.quiz_attempts[key] = {
+            source_attempts[key] = {
                 "score": to_float(r.get("Progress (%)")),
                 "status": clean_text(r.get("Status")).lower(),
                 "created_at": created,
+                "source_learner_id": raw_uid,
+                "source_attempt_number": num,
             }
             bump_latest(created)
         except (ValueError, TypeError) as exc:
             bad(sh.title, n, str(exc))
     if dup:
         ds.warnings.append(f"Quiz Attempts: {dup} duplicate attempt rows ignored")
+
+    grouped_attempts = defaultdict(list)
+    for (uid, cid, qid, raw_uid, num), value in source_attempts.items():
+        grouped_attempts[(uid, cid, qid)].append((raw_uid, num, value))
+    for key, attempts in grouped_attempts.items():
+        multiple_accounts = len({raw for raw, _, _ in attempts}) > 1
+        attempts.sort(key=lambda a: (a[2]["created_at"] or dt.datetime.min.replace(tzinfo=dt.timezone.utc), a[0], a[1]))
+        for ordinal, (raw, num, value) in enumerate(attempts, 1):
+            ds.quiz_attempts[(*key, ordinal if multiple_accounts else num)] = value
+        if multiple_accounts:
+            ds.warnings.append("Merged quiz histories ordered by timestamp; original account and attempt numbers retained")
 
     # Derive latest-attempt fields. "Latest" = highest source Attempt # (the LMS sequence).
     by_quiz = defaultdict(list)
@@ -430,6 +458,10 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
         res["latest_score"] = latest["score"] if latest else None
         res["latest_status"] = latest["status"] if latest else ""
         res["ever_passed"] = any(a["status"] == "passed" for _, a in attempts)
+        if len({a["source_learner_id"] for _, a in attempts}) > 1:
+            res["attempts_count"] = len(attempts)
+            vals = [v for v in [res["best_score"], *[a["score"] for _, a in graded]] if v is not None]
+            res["best_score"] = max(vals) if vals else None
     for key, res in ds.quiz_results.items():
         res.setdefault("latest_attempt_number", None)
         res.setdefault("latest_score", None)
@@ -498,6 +530,24 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
         if cnt / total > MAX_ORPHAN_RATIO:
             ds.errors.append(f"{title}: {cnt} unreadable rows (> {MAX_ORPHAN_RATIO:.0%})")
 
+    # Retain original valid academic rows, including overlapping progress and completions.
+    # The canonical tables express distinct items; this evidence prevents silent loss of conflicts.
+    for sheet_key in ("students", "lesson details", "quizzes", "quiz attempts", "submissions"):
+        sh = sheets[sheet_key]
+        for row_number, row in sh.records():
+            try:
+                raw = to_int(row.get("User ID"))
+                cid = to_int(row.get("Course ID"))
+            except (ValueError, TypeError):
+                continue  # already diagnosed by the academic parser above
+            if raw in NON_LEARNER_SOURCE_IDS or (canon(raw), cid) not in ds.enrollments:
+                continue
+            ds.evidence[(sh.title, row_number)] = {
+                "source_learner_id": raw, "canonical_source_id": canon(raw),
+                "payload": json.loads(json.dumps(row, default=str)),
+            }
+    if dup or used:
+        ds.warnings.append("Overlapping academic summaries count distinct learner/items; all contributing source rows retained in AcademicEvidence")
     _cross_check(ds, sheets)
     _possible_duplicate_identities(ds)
 
@@ -522,31 +572,6 @@ def _combine_enrollments(a: dict, b: dict) -> dict:
         else:  # LMS summary counters of the two accounts add up
             out[k] = x + y
     return out
-
-
-def _applicable_merges(sheets: dict, ds) -> dict[int, int]:
-    """Configured merges, minus any group whose accounts both hold a record for the same lesson or quiz
-    (merging those would need a choice between records, so the accounts are kept separate)."""
-    merges = dict(MERGED_LEARNER_IDS)
-    if not merges:
-        return merges
-    members = set(merges) | set(merges.values())
-    seen = defaultdict(set)
-    for key, item_col in (("lesson details", "Lesson ID"), ("quizzes", "Quiz ID"), ("quiz attempts", "Quiz ID")):
-        for _, r in sheets[key].records():
-            try:
-                uid, cid, item = to_int(r.get("User ID")), to_int(r.get("Course ID")), to_int(r.get(item_col))
-            except (ValueError, TypeError):
-                continue
-            if uid in members:
-                seen[(merges.get(uid, uid), key, cid, item)].add(uid)
-    conflicted = {k[0] for k, raws in seen.items() if len(raws) > 1}
-    for dup, c in list(merges.items()):
-        if c in conflicted:
-            del merges[dup]
-            ds.warnings.append(f"Learner merge {dup} -> {c} skipped: both accounts have records for the same "
-                               "lesson or quiz; kept as separate learners for review")
-    return merges
 
 
 def _identity_key(value: str) -> str:

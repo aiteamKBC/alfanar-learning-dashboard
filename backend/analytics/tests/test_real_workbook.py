@@ -52,8 +52,10 @@ def independent_totals(path: Path) -> dict:
             best[k] = max(best.get(k, v), v)
     progress = list(best.values())
     by_type = defaultdict(int)
-    for r in rows("Al Fanar Lesson Details"):
-        by_type[r["Category"].lower()] += 1
+    distinct_lessons = {(r['User ID'], r['Course ID'], r['Category'].lower(), r['Lesson ID'])
+                        for r in rows('Al Fanar Lesson Details')}
+    for _, _, kind, _ in distinct_lessons:
+        by_type[kind] += 1
     wb.close()
     return {
         "learners": len({r["User ID"] for r in st}),

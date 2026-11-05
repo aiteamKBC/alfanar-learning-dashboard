@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { ModuleProgress, QuizByModule } from '@/api/types'
 import InfoTip from '@/components/common/InfoTip.vue'
+import AttendanceScope from '@/components/common/AttendanceScope.vue'
 import ProgressRing from './ProgressRing.vue'
 import { pct } from '@/utils/format'
 
@@ -39,7 +40,7 @@ const cards = computed(() => props.progress.map((m) => ({ ...m, quiz: props.quiz
           <dd class="font-heading text-[15px] font-semibold text-ink tabular">{{ m.enrollments }}</dd>
         </div>
         <div>
-          <dt class="text-ink-3">With activity</dt>
+          <dt class="text-ink-3">Active in LMS</dt>
           <dd class="font-heading text-[15px] font-semibold text-ink tabular">{{ m.active }}<span class="ml-0.5 text-[11px] font-normal text-ink-3">/ {{ m.enrollments }}</span></dd>
         </div>
         <div>
@@ -47,6 +48,10 @@ const cards = computed(() => props.progress.map((m) => ({ ...m, quiz: props.quiz
           <dd class="font-heading text-[15px] font-semibold text-ink tabular">{{ pct(m.quiz?.mean_latest_score) }}</dd>
         </div>
       </dl>
+      <p class="mt-2 text-[12px] font-semibold text-ink">
+        Attendance {{ m.attendance.available ? pct(m.attendance.pct) : 'Not Available' }} · {{ m.attendance.attended }}/{{ m.attendance.expected }} present / known observations
+      </p>
+      <AttendanceScope :module="m" />
       <div class="mt-3">
         <div class="flex justify-between text-[11px] text-ink-3"><span>Mean LMS progress</span><span class="tabular">{{ pct(m.mean_progress) }}</span></div>
         <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-subtle"><div class="h-full rounded-full bg-series-3" :style="{ width: `${m.mean_progress ?? 0}%` }" /></div>

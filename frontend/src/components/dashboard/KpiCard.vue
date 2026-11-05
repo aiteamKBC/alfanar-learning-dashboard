@@ -6,6 +6,7 @@ withDefaults(defineProps<{
   label: string
   value: string
   sub?: string
+  notice?: string
   info?: string
   meter?: number | null
   accent?: string
@@ -44,5 +45,6 @@ const BUBBLE = {
       <div class="h-full rounded-full transition-[width] duration-700" :style="{ width: `${Math.min(100, Math.max(0, meter))}%`, background: accent ?? '#1baf7a' }" />
     </div>
     <p v-if="sub" class="relative mt-2 text-[11.5px] leading-snug text-ink-3">{{ sub }}</p>
+    <p v-if="notice" class="relative mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11.5px] leading-relaxed text-amber-900" data-attendance-notice>{{ notice }}</p>
   </article>
 </template>

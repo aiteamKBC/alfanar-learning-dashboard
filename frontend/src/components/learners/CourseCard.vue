@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import type { CourseProgress } from '@/api/types'
+import type { CourseProgress, ModuleProgress } from '@/api/types'
+import AttendanceScope from '@/components/common/AttendanceScope.vue'
 import Icon from '@/components/common/Icon.vue'
 import ProgressRing from '@/components/dashboard/ProgressRing.vue'
 import { dateTime, pct } from '@/utils/format'
 
-defineProps<{ course: CourseProgress; selected: boolean }>()
+defineProps<{ course: CourseProgress; selected: boolean; module?: ModuleProgress }>()
 defineEmits<{ select: [] }>()
 </script>
 
@@ -40,14 +41,16 @@ defineEmits<{ select: [] }>()
     </dl>
     <div class="mt-3">
       <div class="flex justify-between text-[11px] text-ink-3">
-        <span>Live attendance</span>
+        <span>Attendance evidence</span>
         <span class="tabular">
-          <template v-if="course.attendance.available">{{ course.attendance.attended }} / {{ course.attendance.delivered }} · {{ pct(course.attendance.pct) }}</template>
-          <template v-else-if="course.attendance.teams_identity === false">Unknown · no Teams match</template>
-          <template v-else>Not available</template>
+          <template v-if="course.attendance.available">{{ course.attendance.attended }} / {{ course.attendance.measured ?? course.attendance.delivered }} known · {{ pct(course.attendance.pct) }}</template>
+          <template v-else>Not Available</template>
         </span>
       </div>
+      <p v-if="course.attendance.missing" class="mt-1 text-[10.5px] text-amber-800">{{ course.attendance.missing }} sessions have no attendance evidence</p>
       <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-subtle"><div class="h-full rounded-full bg-navy" :style="{ width: `${course.attendance.pct ?? 0}%` }" /></div>
+      <p class="mt-1 text-[10.5px] text-ink-3">Learner rate: known observations only; missing attendance is excluded.</p>
+      <AttendanceScope v-if="module" :module="module" />
     </div>
     <div class="mt-3 flex items-center justify-between text-[11.5px]">
       <span class="text-ink-3">Last activity {{ dateTime(course.last_activity, false) }}</span>

@@ -24,7 +24,7 @@ from django.utils import timezone
 
 from ..importer.loader import _upsert
 from ..models import (
-    AttendanceImportRun, Course, Enrollment, LectureSession, Learner, SessionAttendance, TeamsMeeting,
+    AttendanceImportRun, Course, Enrollment, LectureSession, Learner, LearnerIdentity, SessionAttendance, TeamsMeeting,
 )
 from .mapping import map_subject
 
@@ -163,6 +163,7 @@ def build_dataset(tables, learners_by_email, learner_names, aliases, courses, en
             ds.warnings.append("A Teams meeting ID has more than one subject; the first is used for mapping")
         cid, status, note = map_subject(subject, courses)
         ds.meetings[mid] = {"subject": subject[:500], "course_source_id": cid, "mapping_status": status,
+                            "evidence_source": "teams_intervals", "source_file": "",
                             "mapping_note": note[:500]}
 
     occ_reports = defaultdict(list)
@@ -227,6 +228,8 @@ def build_dataset(tables, learners_by_email, learner_names, aliases, courses, en
     for (mid, day, lid), ivs in intervals.items():
         merged = merge_intervals(ivs)
         merged_away += len(ivs) - len(merged)
+        if not merged:
+            continue
         seconds = int(sum((b - a).total_seconds() for a, b in merged))
         ds.attendance[(mid, day, lid)] = {
             "presence_seconds": seconds, "interval_count": len(merged),
@@ -311,7 +314,11 @@ def load_dataset(ds: AttendanceDataset) -> dict:
 def registry_lookup():
     learners = list(Learner.objects.values_list("source_id", "email", "name"))
     by_email, dup_emails = {}, set()
-    for sid, email, _ in learners:
+    identities = [(sid, email) for sid, email, _ in learners]
+    canonical_ids = {sid for sid, _, _ in learners}
+    identities += list(LearnerIdentity.objects.filter(canonical_source_id__in=canonical_ids)
+                       .values_list("canonical_source_id", "email"))
+    for sid, email in identities:
         e = norm_email(email)
         if e:
             if e in by_email and by_email[e] != sid:
@@ -323,12 +330,11 @@ def registry_lookup():
 
 
 def run_attendance_import(path=None) -> AttendanceImportRun:
-    path = Path(path or settings.TEAMS_ATTENDANCE_PATH)
-    run = AttendanceImportRun.objects.create(source_ref=path.name)
+    path = Path(path) if path else Path(settings.ATTENDANCE_DIRECTORY)
+    run = AttendanceImportRun.objects.create(source_ref=path.name if path.is_file() else "Four authoritative module workbooks")
     try:
         if path.is_file():
             run.source_modified_at = dt.datetime.fromtimestamp(os.stat(path).st_mtime, tz=dt.timezone.utc)
-        tables = read_workbook(path)
         learners, by_email, dup_emails = registry_lookup()
         if not learners:
             raise AttendanceValidationError(["Learner registry is empty; import LMS data first"])
@@ -337,9 +343,15 @@ def run_attendance_import(path=None) -> AttendanceImportRun:
             raise AttendanceValidationError(alias_problems)
         courses = dict(Course.objects.values_list("source_id", "title"))
         enrollments = set(Enrollment.objects.values_list("learner__source_id", "course__source_id"))
-        ds = build_dataset(tables, by_email, {sid: name for sid, _, name in learners}, aliases, courses, enrollments,
-                           settings.TEAMS_STAFF_DOMAINS, settings.TEAMS_MIN_ATTENDANCE_MINUTES,
-                           settings.TEAMS_MIN_LEARNERS_FOR_DELIVERED)
+        if path.is_dir():
+            from .matrices import read_matrices, SOURCES
+            ds = read_matrices(path, by_email, aliases, courses, enrollments)
+            run.source_modified_at = dt.datetime.fromtimestamp(max((path / f).stat().st_mtime for f, _ in SOURCES.values()), tz=dt.timezone.utc)
+        else:
+            tables = read_workbook(path)
+            ds = build_dataset(tables, by_email, {sid: name for sid, _, name in learners}, aliases, courses, enrollments,
+                               settings.TEAMS_STAFF_DOMAINS, settings.TEAMS_MIN_ATTENDANCE_MINUTES,
+                               settings.TEAMS_MIN_LEARNERS_FOR_DELIVERED)
         ds.diagnostics["ambiguous_registry_emails"] = len(dup_emails)
         with transaction.atomic():
             stats = load_dataset(ds)

@@ -1,59 +1,53 @@
-# Data mapping: Alfanar Endpoint workbook
+# Data mapping and KPI definitions
 
-Source: `data/Alfanar Endpoint.xlsx`. It is read-only and never committed. It has 15 worksheets, all inspected by the importer (`backend/analytics/importer/normalize.py`). Figures are from the import on 2026-11-04.
+Google Sheets is the primary LMS source, using the unchanged `spreadsheets.readonly` integration. `data/Alfanar Endpoint.xlsx` is an older snapshot and test fixture. Source rows and workbooks are never modified. See [attendance.md](attendance.md) for the separate attendance import.
 
-## Worksheets
-
-| Worksheet | Rows | Grain | Used for |
-|---|---|---|---|
-| Al Fanar Students | 123 (+41 blank) | learner × course | **Master** for learners, courses and enrollments, plus LMS `Progress (%)` |
-| Al Fanar Quizzes | 1,322 | learner × quiz | Quiz items, attempts count, best score |
-| Al Fanar Quiz Attempts | 1,446 | learner × quiz × attempt | Attempt history, latest attempt, pass status |
-| Al Fanar Lesson Details | 4,585 | learner × lesson | **Master** for lesson completions (video/pdf/audio/reading) |
-| Al Fanar Videos / PDFs / Audio / Readings | 1,850 / 1,697 / 406 / 632 | learner × lesson | Cross-check only (subsets of Lesson Details) |
-| Al Fanar All Activities | 5,955 | union | Cross-check only: equals Lesson Details + Quizzes + Submissions |
-| Al Fanar Assignments | 48 | learner × assignment | Assignment items |
-| Al Fanar Submissions | 48 | submission | Submission status and grade |
-| Al Fanar Reading Sessions | 632 | learner × reading | Not loaded (duplicates Readings timing) |
-| Al Fanar Coverage / Diagnostics | 123 | learner × course | Not loaded (derived export diagnostics) |
-| Al Fanar Other Lessons | 0 | n/a | Empty |
-
-The union sheets are never loaded, so nothing is double-counted. The importer checks on every run that the per-type sheets and All Activities reconcile with the loaded totals. All of them reconcile exactly.
-
-## Identifiers and relationships
-
-- `User ID` → Learner (44 unique in the export; 38 after excluding 2 non-learner accounts and merging 4 verified duplicate accounts, see below). `Course ID` → Course (4). A learner in several modules is one Learner with several Enrollments (118).
-- **Verified duplicate accounts:** `backend/analytics/importer/identities.py` maps a duplicate User ID to the learner's canonical User ID. Every row of the duplicate (enrollments, lessons, quizzes, attempts, submissions) is attributed to the canonical learner. When both accounts are enrolled in the same module, the enrollment keeps the higher LMS progress, the earliest registration and the latest login, and adds the LMS summary counters together. A merge is refused, and the accounts stay separate with a sync warning, if both hold records for the same lesson or quiz. Pairs are added only with evidence (see the file); a similar name alone is not enough. User ID 743 shares a display name with another learner but is **not** merged, because its email names a different first name and it was online at the same time as that learner in Teams.
-- **Non-learner accounts:** User IDs listed in `backend/analytics/importer/exclusions.py` (a staff/manager account and a training-provider account, confirmed by the project owner) are skipped in every sheet during normalization. They never become learners, enrollments or learner activity, and so are also absent from the Teams learner registry. The source is never modified.
-- Quiz IDs (120), Lesson IDs (356) and Assignment IDs (4) are unique per course. An Activity's key is `(course, kind, source_id)`.
-- Every activity row matches an enrollment; there are 0 orphan rows.
-- No exact duplicate rows exist. The importer still de-duplicates on natural keys and logs a warning for any duplicate it skips.
-
-## Semantics and decisions
-
-| Topic | Decision |
+| Worksheet | Grain and purpose |
 |---|---|
-| Course progress | `Students.Progress (%)` is shown as the LMS-reported figure. It is not a qualification outcome. |
-| Lesson completion | Each Lesson Details row counts as one recorded completion. This matches `Students.Videos/PDFs/Text Lessons Completed` exactly. |
-| Quiz "completed" | At least one attempt. This matches `Students.Quizzes Completed`. |
-| Latest quiz score | The score on the highest `Attempt #`. Attempt # is the LMS sequence; in 9 cases `Created At` ordering disagrees. Best score is kept separately. |
-| Pass | The source attempt `Status == passed`. Pass marks vary per quiz (67% passed in one quiz while 90% failed in another), so no threshold is applied. |
-| Submissions | The Submissions sheet is the source of truth. `Students.Submissions Count` disagrees for 40 enrollments. "Submitted" excludes `draft`. |
-| Assignment grade | `Submissions.Grade` is an assignment grade, not a module grade. Blank means not graded. |
-| Durations | Used only when `Time Source = start_end_difference`. Otherwise the value is null, never 0. Recorded spans are open-to-close times with extreme outliers (median 6–30 s; sessions over 4 h make up more than 80% of the total), so time is **not** used as an executive KPI. |
-| Timestamps | The export states no timezone, so all times are treated as UTC. Lesson start/end values are Unix epochs. |
-| Missing values | Blank stays null and is shown as "—", "No record" or "No attempts". It is never treated as 0 or as a failure. |
+| Students | Source learner/module enrollment and reported progress |
+| Lesson Details | Video, PDF, audio and reading completion evidence |
+| Quizzes | Source learner/quiz summary and best score |
+| Quiz Attempts | Attempt sequence, score and pass status |
+| Assignments | Known assignment catalogue |
+| Submissions | Submission ID, status, grade and timestamp |
+| Videos, PDFs, Audio, Readings, All Activities | Cross-checks only; never additional facts |
+| Coverage, Diagnostics, Reading Sessions, Other Lessons | Inspected; never additional academic facts |
 
-## What cannot be calculated reliably
+## Identity reconciliation
 
-- **Scheduled sessions / attendance.** `Session #` is always 1 and `Session Record ID` is empty. There is no attendance field. The matrix is therefore activity-based, and attendance is shown as *Not available*.
-- **Official curriculum size.** The export only contains items at least one learner interacted with. "Known activities" (the completion denominators) are the items seen in the export for each module, so they are a lower bound. `Coverage Note` confirms: "Only recorded student activities".
-- **Quiz time.** `Actual Time` is blank, and the quiz times are fixed estimates (3 min per question), so they are not used.
-- **Certificates / formal completion.** The certificate links are not loaded or shown.
-- **Source freshness.** The workbook has no internal modified property, so the file's mtime is used and labelled as such. For Google Sheets, the latest activity timestamp is shown, because the spreadsheet modified time would need a Drive scope.
+`importer/exclusions.py` contains six excluded source IDs: the two prior non-learners and four newly approved exclusions. Every academic sheet applies these exclusions before canonicalization; no Google row is deleted.
 
-## Data-quality notes (flagged by importer, not modified)
+`importer/identities.py` preserves the four prior verified duplicate mappings and adds the owner-approved groups, including formerly unresolved ID 743. Mappings have no chains. No unapproved account is merged. `LearnerIdentity` retains every allowed source account and email under its canonical ID so future syncs maintain matching across approved aliases.
 
-- 40 enrollments have a `Submissions Count` that differs from the actual submission rows.
-- User IDs 743, 779 and 1229 normalize to the same identity. They look like duplicate LMS accounts but are kept separate.
-- Many `Name` values are username-style strings (for example `first-lastalfanar-com`), exactly as they appear in the source.
+One canonical learner/module pair creates one enrollment. Overlapping enrollments retain maximum source progress, earliest registration and latest login. Original progress values and source counters remain in `AcademicEvidence`; source summary counters do not drive completion KPIs.
+
+`AcademicEvidence` stores every allowed Students, Lesson Details, Quizzes, Quiz Attempts and Submissions row with original account, canonical ID, sheet and row number. Conflicting values remain reviewable. Canonical lessons count once per learner/module/item; the actual source row with the greatest available duration supplies representative timing. No artificial start/end span is created. The current live source has 4,579 valid lesson rows and 4,575 distinct canonical completions.
+
+Attempts preserve original account and attempt numbers. When merged accounts overlap on a quiz, every separate attempt remains and receives a deterministic chronological display sequence with original numbering retained. Single-account quizzes retain source attempt order even when timestamps disagree. Every submission ID and grade remains; activity matrices expose full submission histories alongside the latest record.
+
+## KPI definitions
+
+| Metric | Calculation |
+|---|---|
+| Learners | Distinct canonical learner IDs in selected modules |
+| Enrollments | Distinct canonical learner/module pairs |
+| Active in LMS | Any recorded lesson, attempt or assignment record, including drafts; does not measure overall engagement |
+| Learner status filter | Classifies each learner across selected modules; Overview and Learners use the same scope |
+| Mean LMS progress | Mean non-null canonical enrollment progress; overlapping source progress uses maximum |
+| Known curriculum | Distinct exported items or assignment catalogue; lower bound of official curriculum |
+| Quiz completion | Attempted learner/quiz results / (enrollments × known quizzes per module) |
+| Latest quiz score | Latest graded attempt by source sequence, or chronology across merged overlapping accounts |
+| Mean latest score | Mean raw latest scores, rounded once at final aggregation, including learner rollups |
+| Quiz pass rate | Latest graded results with source status `passed` / all graded results; no invented pass threshold |
+| Assignment submissions | Non-draft records; drafts reported separately |
+| Assignment coverage | Distinct learner/assignment pairs with any non-draft submission / possible pairs |
+| Materials completed | Distinct canonical learner/lesson completions |
+| Activity coverage | Enrollments with any recorded LMS activity / enrollments |
+| Recorded time | Unverified LMS open-to-close timers; not verified study hours |
+| Delivered lectures | Owner-confirmed count where supplied; otherwise dated sessions with positive attendance evidence; provenance displayed |
+
+Missing scores are not zero or failures. Missing attendance is **Not Available**. Submission rows take precedence over reported counts, which differ for 37 current canonical enrollments. Raw-versus-distinct cross-check differences from approved overlaps are explicitly reconciled by the independent audit.
+
+On 2026-11-05 the live local reconciliation yields 28 learners, 104 enrollments, four modules, 25 active in LMS, 120 distinct quizzes, 1,304 learner/quiz results, 1,427 attempts, 4,575 distinct lesson completions and 45 submission records (42 non-draft, three drafts). Mean LMS progress is 38.4%, mean latest quiz score 95.3%, and 1,287 / 1,304 graded results passed (98.7%). Sixty lesson timers exceed eight hours; timer totals are unverified.
+
+Run `python backend/manage.py audit_dashboard` to reproduce the independent source audit. It reads fresh Google data by default, accepts `--snapshot` for captured source JSON, fails on discrepancies and writes an aggregate local report under ignored `data/`.

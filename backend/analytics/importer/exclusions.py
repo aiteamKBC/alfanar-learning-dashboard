@@ -11,4 +11,8 @@ Only add an entry confirmed by the project owner. Keep personal names out of thi
 NON_LEARNER_SOURCE_IDS: dict[int, str] = {
     1: "Training-provider account (display name is a Kent Business College domain), confirmed not a learner (2026-11-05)",
     17: "Staff / manager account, confirmed not a learner by the project owner (2026-11-05)",
+    1267: "Owner-approved excluded account (2026-11-05)",
+    976: "Owner-approved excluded account (2026-11-05)",
+    450: "Owner-approved excluded account (2026-11-05)",
+    762: "Owner-approved excluded account (2026-11-05)",
 }

@@ -91,8 +91,8 @@ def filters(request):
     return Response({
         "courses": [{"course_id": c.source_id, "title": c.title} for c in Course.objects.order_by("title")],
         "activity_types": [{"value": v, "label": l} for v, l in ActivityKind.choices],
-        "engagement": [{"value": "active", "label": "With recorded activity"},
-                       {"value": "inactive", "label": "No recorded activity"}],
+        "engagement": [{"value": "active", "label": "Active in LMS"},
+                       {"value": "inactive", "label": "No recorded LMS activity"}],
     })
 
 

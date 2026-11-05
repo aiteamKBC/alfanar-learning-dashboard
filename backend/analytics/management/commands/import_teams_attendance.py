@@ -18,7 +18,7 @@ class Command(BaseCommand):
     help = "Import verified learner attendance from the Teams attendance workbook (read-only)."
 
     def add_arguments(self, parser):
-        parser.add_argument("--path", help="Override TEAMS_ATTENDANCE_PATH")
+        parser.add_argument("--path", help="Directory containing all four authoritative module workbooks (or explicit legacy interval workbook for diagnostics)")
         parser.add_argument("--quiet", action="store_true", help="Only print the status line")
 
     def handle(self, *args, path=None, quiet=False, **opts):

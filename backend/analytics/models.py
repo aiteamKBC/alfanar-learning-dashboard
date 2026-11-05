@@ -147,6 +147,8 @@ class QuizAttempt(models.Model):
     score = models.FloatField(null=True, blank=True)
     status = models.CharField(max_length=20, blank=True)
     created_at = models.DateTimeField(null=True, blank=True)
+    source_learner_id = models.BigIntegerField(null=True, blank=True)
+    source_attempt_number = models.IntegerField(null=True, blank=True)
 
     class Meta:
         ordering = ["attempt_number"]
@@ -226,6 +228,8 @@ class TeamsMeeting(models.Model):
     course_source_id = models.BigIntegerField(null=True, blank=True)
     mapping_status = models.CharField(max_length=20, choices=Mapping.choices, default=Mapping.UNMAPPED)
     mapping_note = models.CharField(max_length=500, blank=True)
+    evidence_source = models.CharField(max_length=30, default="teams_intervals")
+    source_file = models.CharField(max_length=300, blank=True)
 
 
 class LectureSession(models.Model):
@@ -233,8 +237,8 @@ class LectureSession(models.Model):
 
     meeting = models.ForeignKey(TeamsMeeting, on_delete=models.CASCADE, related_name="sessions")
     session_date = models.DateField()
-    starts_at = models.DateTimeField()
-    ends_at = models.DateTimeField()
+    starts_at = models.DateTimeField(null=True, blank=True)
+    ends_at = models.DateTimeField(null=True, blank=True)
     report_count = models.IntegerField()
     verified_learners = models.IntegerField()       # learners meeting the attendance threshold
     delivered = models.BooleanField()               # passes the delivered-session rule
@@ -250,12 +254,32 @@ class SessionAttendance(models.Model):
 
     session = models.ForeignKey(LectureSession, on_delete=models.CASCADE, related_name="attendance")
     learner_source_id = models.BigIntegerField(db_index=True)
-    presence_seconds = models.IntegerField()
-    interval_count = models.IntegerField()
-    first_join = models.DateTimeField()
-    last_leave = models.DateTimeField()
+    presence_seconds = models.IntegerField(null=True, blank=True)
+    interval_count = models.IntegerField(null=True, blank=True)
+    first_join = models.DateTimeField(null=True, blank=True)
+    last_leave = models.DateTimeField(null=True, blank=True)
     attended = models.BooleanField()                # presence >= attendance threshold
     match_method = models.CharField(max_length=20)  # email | alias
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["session", "learner_source_id"], name="uniq_session_attendance")]
+
+
+class LearnerIdentity(models.Model):
+    """Every retained LMS account and email, including approved merged identities."""
+    source_id = models.BigIntegerField(unique=True)
+    canonical_source_id = models.BigIntegerField(db_index=True)
+    email = models.CharField(max_length=300, blank=True)
+    name = models.CharField(max_length=300)
+
+
+class AcademicEvidence(models.Model):
+    """Read-only source rows behind reconciled summaries; conflicting values remain reviewable."""
+    sheet = models.CharField(max_length=100)
+    row_number = models.IntegerField()
+    source_learner_id = models.BigIntegerField(db_index=True)
+    canonical_source_id = models.BigIntegerField(db_index=True)
+    payload = models.JSONField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["sheet", "row_number"], name="uniq_academic_evidence")]

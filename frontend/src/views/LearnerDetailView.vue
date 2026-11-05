@@ -2,7 +2,7 @@
 import { computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/api/client'
-import type { LearnerDetail, Matrix } from '@/api/types'
+import type { Charts, LearnerDetail, Matrix } from '@/api/types'
 import { useAsync } from '@/api/useAsync'
 import Avatar from '@/components/common/Avatar.vue'
 import Icon from '@/components/common/Icon.vue'
@@ -11,7 +11,7 @@ import KpiCard from '@/components/dashboard/KpiCard.vue'
 import CourseCard from '@/components/learners/CourseCard.vue'
 import ActivityMatrix from '@/components/matrix/ActivityMatrix.vue'
 import LiveSessions from '@/components/matrix/LiveSessions.vue'
-import { dateTime, hours, num, pct } from '@/utils/format'
+import { dateTime, num, pct } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -19,6 +19,7 @@ const learnerId = computed(() => String(route.params.id))
 const moduleId = computed(() => (typeof route.query.module === 'string' ? route.query.module : ''))
 
 const detail = useAsync(() => api.get<LearnerDetail>(`learners/${learnerId.value}`), [learnerId])
+const moduleFacts = useAsync(() => api.get<Charts>('dashboard/charts'))
 const matrix = useAsync(
   () => (moduleId.value ? api.get<Matrix>(`learners/${learnerId.value}/courses/${moduleId.value}/matrix`) : Promise.resolve(null)),
   [learnerId, moduleId],
@@ -89,20 +90,21 @@ const materialsSub = computed(() => Object.entries(lessonsByType.value).filter((
           <KpiCard label="Latest quiz score" icon="target" tone="blue" :value="pct(s.mean_latest_score)" :meter="s.mean_latest_score" accent="#2a78d6" :sub="s.quizzes_graded ? `${s.quizzes_passed_latest} / ${s.quizzes_graded} latest attempts passed` : 'No graded attempts recorded'" :info="defs.mean_latest_score" />
           <KpiCard label="Completed materials" icon="book" tone="navy" :value="num(s.lessons_completed)" :sub="materialsSub" :info="defs.materials_completed" />
           <KpiCard label="Assignments" icon="upload" tone="neutral" :value="`${num(s.assignments_submitted)} / ${num(s.assignments_known)}`" sub="Non-draft submissions / known assignments" :info="defs.assignment_coverage" />
-          <KpiCard v-if="s.attendance.available" label="Live attendance" icon="users" tone="navy" accent="#142c52"
+          <KpiCard v-if="s.attendance.available" label="Attendance (known evidence)" icon="users" tone="navy" accent="#142c52"
             :value="pct(s.attendance.pct)" :meter="s.attendance.pct"
-            :sub="`${s.attendance.attended} / ${s.attendance.expected} delivered sessions · ${hours(s.attendance.live_seconds)} live · ${s.attendance.modules_covered} of ${s.attendance.modules_total} modules have Teams data`"
+            :sub="`${s.attendance.attended} / ${s.attendance.expected} known learner-sessions · ${s.attendance.modules_covered} of ${s.attendance.modules_total} modules measured`"
+            notice="Known observations only; missing attendance is excluded. Confirmed lectures and module evidence coverage are shown on each module card below."
             :info="defs.attendance" />
-          <KpiCard v-else-if="s.attendance.modules_without_teams_identity" label="Live attendance" icon="users" tone="neutral" value="Unknown"
+          <KpiCard v-else-if="s.attendance.modules_without_teams_identity" label="Attendance (known evidence)" icon="users" tone="neutral" value="Not Available"
             sub="No matched Microsoft Teams identity for this learner — not counted as absent" :info="defs.attendance" />
-          <KpiCard v-else label="Live attendance" icon="users" tone="neutral" value="Not available" sub="No mapped Microsoft Teams meeting for this learner's modules" :info="defs.attendance" />
+          <KpiCard v-else label="Attendance (known evidence)" icon="users" tone="neutral" value="Not Available" sub="No measurable attendance evidence for this learner's modules" :info="defs.attendance" />
         </div>
 
         <section>
           <h2 class="text-[16px] font-semibold text-ink">Enrolled modules</h2>
           <p class="mb-3 text-[12.5px] text-ink-3">Select a module to open its learning activity matrix.</p>
           <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <CourseCard v-for="c in detail.data.value.courses" :key="c.course_id" :course="c" :selected="String(c.course_id) === moduleId" @select="selectModule(c.course_id)" />
+            <CourseCard v-for="c in detail.data.value.courses" :key="c.course_id" :course="c" :module="moduleFacts.data.value?.module_progress.find((m) => m.course_id === c.course_id)" :selected="String(c.course_id) === moduleId" @select="selectModule(c.course_id)" />
           </div>
         </section>
 
@@ -120,7 +122,7 @@ const materialsSub = computed(() => Object.entries(lessonsByType.value).filter((
                   <div class="font-heading text-[22px] font-semibold text-ink tabular">{{ pct(matrix.data.value.course.progress_pct) }}</div>
                 </div>
               </div>
-              <LiveSessions :attendance="matrix.data.value.attendance" :definition="defs.attendance" class="mb-4" />
+              <LiveSessions :attendance="matrix.data.value.attendance" :module="moduleFacts.data.value?.module_progress.find((m) => m.course_id === matrix.data.value?.course.course_id)" :definition="defs.attendance" class="mb-4" />
               <StateBlock :empty="matrix.data.value.rows.length === 0" empty-title="No activities recorded for this module" empty-text="The export contains no quizzes, lessons or assignments for this module.">
                 <ActivityMatrix :matrix="matrix.data.value" />
               </StateBlock>

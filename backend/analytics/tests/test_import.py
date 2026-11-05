@@ -181,7 +181,7 @@ class NonLearnerExclusionTests(TestCase):
 
     def test_configured_ids(self):
         from analytics.importer.exclusions import NON_LEARNER_SOURCE_IDS
-        self.assertEqual(set(NON_LEARNER_SOURCE_IDS), {1, 17})
+        self.assertEqual(set(NON_LEARNER_SOURCE_IDS), {1, 17, 1267, 976, 450, 762})
 
     def test_excluded_account_removed_everywhere_others_unchanged(self):
         from unittest import mock
@@ -232,8 +232,9 @@ class LearnerMergeTests(TestCase):
 
     def test_configured_merges(self):
         from analytics.importer.identities import MERGED_LEARNER_IDS
-        self.assertEqual(MERGED_LEARNER_IDS, {1056: 760, 1058: 753, 1062: 748, 779: 1229})
-        self.assertNotIn(743, MERGED_LEARNER_IDS)                       # unverified: kept separate
+        self.assertEqual(MERGED_LEARNER_IDS, {1056: 760, 1058: 753, 1062: 748, 779: 1229,
+                                             743: 1229, 746: 763, 1221: 763, 1222: 763,
+                                             758: 1059, 1038: 1059})
         self.assertFalse(set(MERGED_LEARNER_IDS) & set(MERGED_LEARNER_IDS.values()))  # no chains
 
     def _norm(self, merges, tables=None):
@@ -271,9 +272,16 @@ class LearnerMergeTests(TestCase):
         self.assertEqual(e["reported_submissions"], (b["reported_submissions"] or 0) + 2)
         self.assertNotIn(104, ds.learners)
 
-    def test_conflicting_activity_keeps_accounts_separate(self):
-        ds = self._norm({102: 101})   # both took quiz 701 in the fixture -> merge must be refused
-        self.assertIn(102, ds.learners)
+    def test_owner_approved_overlap_preserves_evidence_and_attempts(self):
+        ds = self._norm({102: 101})
+        self.assertNotIn(102, ds.learners)
         self.assertIn(101, ds.learners)
-        self.assertTrue([w for w in ds.warnings if "merge 102 -> 101 skipped" in w])
-        self.assertEqual(ds.merged_learners["accounts_merged"], 0)
+        self.assertEqual(len(ds.quiz_attempts), 4)  # both source accounts' attempt #1 retained
+        history = [(k, v) for k,v in ds.quiz_attempts.items() if k[:3] == (101, 9001, 701)]
+        self.assertEqual(len(history), 3)
+        self.assertEqual({v['source_learner_id'] for _,v in history}, {101, 102})
+        self.assertEqual(ds.quiz_results[(101, 9001, 701)]['latest_score'], 70)
+        self.assertEqual(ds.quiz_results[(101, 9001, 701)]['best_score'], 90)
+        self.assertEqual(ds.merged_learners["accounts_merged"], 1)
+        self.assertEqual(len([v for v in ds.evidence.values() if 'Lesson ID' in v['payload']]), 6)
+        self.assertEqual(len(ds.lesson_records), 4)  # same video completion counts once

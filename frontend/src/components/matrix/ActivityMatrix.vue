@@ -42,10 +42,11 @@ const foot = computed(() => {
     attempts: quizzes.reduce((n, r) => n + r.quiz!.history.length, 0),
     passed: quizzes.filter((r) => r.quiz!.latest_status === 'passed').length,
     graded: scores.length,
-    meanScore: scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null,
+    meanScore: scores.length === props.matrix.footer.quiz.graded ? props.matrix.footer.quiz.mean_latest_score
+      : (scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null),
     lesson: Object.fromEntries((['video', 'audio', 'pdf', 'reading'] as Kind[]).map((k) => [k, of(k)])) as Record<string, { known: number; recorded: number }>,
     assignment: of('assignment'),
-    submitted: assignments.filter((r) => r.assignment && r.assignment.status !== 'draft').length,
+    submitted: assignments.filter((r) => r.assignment?.has_submitted).length,
     graded_assignments: assignments.filter((r) => r.assignment?.grade !== null && r.assignment?.grade !== undefined).length,
     seconds: timed.reduce((n, r) => n + (r.lesson!.recorded_seconds ?? 0), 0),
     timed: timed.length,
@@ -257,7 +258,7 @@ const TF = 'border-t-2 border-line-strong bg-[#f6f5f1] px-3 py-3 align-top text-
               <td :class="TF" class="tabular"><b>{{ foot.submitted }} / {{ foot.assignment.known }}</b><div class="text-ink-3">submitted</div></td>
               <td :class="TF" class="tabular"><b>{{ foot.graded_assignments }}</b><div class="text-ink-3">graded</div></td>
             </template>
-            <td :class="TF" class="tabular"><b>{{ duration(foot.seconds) }}</b><div class="text-ink-3">{{ foot.timed }} timed lesson records</div></td>
+            <td :class="TF" class="tabular"><b>{{ duration(foot.seconds) }}</b><div class="text-ink-3">{{ foot.timed }} LMS timers · unverified study time</div></td>
           </tr>
         </tfoot>
       </table>

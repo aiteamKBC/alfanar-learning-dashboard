@@ -20,7 +20,7 @@ export interface Summary {
 
 export interface DeliveredLectures {
   count: number | null
-  source: 'owner_confirmed' | 'teams' | null
+  source: 'owner_confirmed' | 'teams' | 'attendance_matrix' | null
   teams_sessions: number | null
   differs_from_teams: boolean
   confirmed_by?: string
@@ -124,7 +124,7 @@ export interface MatrixRow {
   lesson?: { recorded_seconds: number | null; started_at: string | null; ended_at: string | null; time_source: string } | null
   quiz?: QuizCell | null
   quiz_questions?: number | null
-  assignment?: { status: string; grade: number | null; updated_at: string | null; submissions: number } | null
+  assignment?: { status: string; grade: number | null; updated_at: string | null; submissions: number; has_submitted: boolean; history: { source_id: number; number: number | null; status: string; grade: number | null; updated_at: string | null }[] } | null
 }
 
 export interface ColTotal { known: number; recorded: number }
@@ -176,7 +176,11 @@ export interface AttendanceAggregate {
   attended: number
   expected: number
   pct: number | null
-  live_seconds: number
+  live_seconds: number | null
+  possible_learner_sessions: number
+  missing_learner_sessions: number
+  coverage_pct: number | null
+  evidence_source: string
   delivered_sessions: number
   enrollments_covered: number
   enrollments_measured: number
@@ -188,6 +192,9 @@ export interface AttendanceAggregate {
 export interface EnrollmentAttendance {
   available: boolean
   delivered: number | null
+  measured?: number
+  missing?: number
+  evidence_source?: string
   attended: number | null
   pct: number | null
   live_seconds: number | null
@@ -211,7 +218,7 @@ export interface LiveSession {
   ends_at: string
   subject: string
   learners_attended: number
-  status: 'attended' | 'brief' | 'not_recorded'
+  status: 'attended' | 'brief' | 'not_recorded' | 'absent' | 'unavailable'
   presence_seconds: number | null
   first_join: string | null
   last_leave: string | null

@@ -14,7 +14,7 @@ import KpiCard from '@/components/dashboard/KpiCard.vue'
 import LearnerModuleHeatmap from '@/components/dashboard/LearnerModuleHeatmap.vue'
 import ModuleSnapshot from '@/components/dashboard/ModuleSnapshot.vue'
 import { shortLabel } from '@/components/dashboard/echarts'
-import { hours, num, pct, ratio } from '@/utils/format'
+import { num, pct, ratio } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -49,19 +49,31 @@ const allModules = useAsync(
 const k = computed(() => summary.data.value?.kpis)
 const defs = computed(() => summary.data.value?.definitions ?? charts.data.value?.definitions ?? {})
 const courseName = computed(() => filters.data.value?.courses.find((c) => String(c.course_id) === course.value)?.title)
+const attendanceNotice = computed(() => {
+  const modules = (allModules.data.value?.module_progress ?? []).filter((m) => !course.value || String(m.course_id) === course.value)
+  const limited = modules.find((m) => m.delivered_lectures.differs_from_teams)
+  const scope = limited
+    ? `${limited.course}: Only ${limited.delivered_sessions} of ${limited.delivered_lectures.count} confirmed lectures have attendance data. Module evidence coverage within those dated sessions is ${pct(limited.attendance.coverage_pct)}. The percentage does not describe attendance across all ${limited.delivered_lectures.count} lectures. `
+    : ''
+  const sessions = modules.length === 1 ? `${modules[0].delivered_sessions ?? 'Not Available'} sessions with attendance evidence. `
+    : (modules.length ? '' : 'Confirmed lecture and session coverage details are Not Available until module evidence loads. ')
+  return `${scope}${sessions}Rates use known observations from eligible learners with verified source identities only; missing attendance is excluded. Binary presence does not verify attendance duration.`
+})
 
 const kpiCards = computed(() => {
   const x = k.value
   if (!x) return []
   const status = Object.entries(x.submissions.by_status ?? {}).map(([s, n]) => `${n} ${s}`).join(' · ')
   return [
+    { label: 'Active in LMS', icon: 'users', tone: 'neutral' as const, value: `${num(x.active_learners.value)} / ${num(x.unique_learners.value)}`, sub: `${num(x.enrollments.value)} enrollments · ${pct(x.active_learners.pct)} active`, info: defs.value.active_learners },
     { label: 'Mean LMS progress', icon: 'gauge', tone: 'teal' as const, value: pct(x.mean_progress.value), meter: x.mean_progress.value, sub: `Median ${pct(x.mean_progress.median)} · ${num(x.mean_progress.n)} enrollments`, info: defs.value.mean_progress },
     x.attendance.available
-      ? { label: 'Live attendance', icon: 'users', tone: 'navy' as const, accent: '#142c52', value: pct(x.attendance.pct), meter: x.attendance.pct,
-          sub: `${ratio(x.attendance.attended, x.attendance.expected)} learner-sessions · ${num(x.attendance.delivered_sessions)} Teams sessions · ${hours(x.attendance.live_seconds)} live`,
+      ? { label: 'Attendance (known evidence)', icon: 'users', tone: 'navy' as const, accent: '#142c52', value: pct(x.attendance.pct), meter: x.attendance.pct,
+          sub: `${ratio(x.attendance.attended, x.attendance.expected)} present / known learner-session observations · ${pct(x.attendance.coverage_pct)} evidence coverage (${ratio(x.attendance.expected, x.attendance.possible_learner_sessions)} known / possible within dated sessions)`,
+          notice: attendanceNotice.value,
           info: `${defs.value.attendance} ${x.attendance.enrollments_without_teams_identity} of ${x.attendance.enrollments_covered} covered enrollments (${x.attendance.learners_without_teams_identity} learners) have no matched Teams identity: attendance unknown, excluded from this figure.` }
-      : { label: 'Live attendance', icon: 'users', tone: 'neutral' as const, value: 'Not available', sub: 'No mapped Microsoft Teams meeting for this selection', info: defs.value.attendance },
-    { label: 'Mean latest quiz score', icon: 'target', tone: 'blue' as const, accent: '#2a78d6', value: pct(x.mean_latest_score.value), meter: x.mean_latest_score.value, sub: `Latest graded attempt across ${num(x.mean_latest_score.n)} quizzes`, info: defs.value.mean_latest_score },
+      : { label: 'Attendance (known evidence)', icon: 'users', tone: 'neutral' as const, value: 'Not Available', sub: 'No measurable attendance evidence for this selection', info: defs.value.attendance },
+    { label: 'Mean latest quiz score', icon: 'target', tone: 'blue' as const, accent: '#2a78d6', value: pct(x.mean_latest_score.value), meter: x.mean_latest_score.value, sub: `Latest graded attempt across ${num(x.mean_latest_score.n)} learner–quiz results`, info: defs.value.mean_latest_score },
     { label: 'Quiz pass rate', icon: 'award', tone: 'blue' as const, accent: '#2a78d6', value: pct(x.pass_rate.pct), meter: x.pass_rate.pct, sub: `${ratio(x.pass_rate.value ?? 0, x.pass_rate.denominator ?? 0)} latest attempts passed`, info: defs.value.pass_rate },
     { label: 'Assignment submissions', icon: 'upload', tone: 'neutral' as const, accent: '#6b7489', value: num(x.submissions.value), meter: x.assignment_coverage.pct, sub: `${status || 'none'} · ${pct(x.assignment_coverage.pct)} of possible`, info: `${defs.value.submissions} ${defs.value.assignment_coverage}` },
   ]
@@ -98,9 +110,9 @@ function clearFilters() { router.replace({ query: {} }) }
       <div class="flex flex-wrap items-end gap-6">
         <div class="mr-auto max-w-2xl">
           <p class="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-teal-200/90">Executive Overview · Alfanar programme</p>
-          <h1 class="mt-2 text-[26px] font-semibold leading-tight sm:text-[30px]">{{ courseName ?? 'Learning engagement at a glance' }}</h1>
+          <h1 class="mt-2 text-[26px] font-semibold leading-tight sm:text-[30px]">{{ courseName ?? 'LMS activity at a glance' }}</h1>
           <p class="mt-2 text-sm leading-relaxed text-blue-100/80">
-            Engagement, learning-material completion and quiz achievement, calculated directly from imported LMS records.
+            LMS activity, learning-material completion and quiz achievement, calculated directly from imported LMS records.
             Progress figures are LMS-reported, not qualification outcomes.
           </p>
         </div>
@@ -144,7 +156,7 @@ function clearFilters() { router.replace({ query: {} }) }
     <StateBlock :loading="summary.loading.value && !summary.data.value" :error="summary.error.value" :empty="k?.enrollments.value === 0" height="9rem" @retry="summary.reload">
       <section :class="{ 'opacity-60 transition-opacity': summary.loading.value }">
         <h2 class="eyebrow mb-2">Key metrics</h2>
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
           <KpiCard v-for="card in kpiCards" :key="card.label" v-bind="card" />
         </div>
       </section>
