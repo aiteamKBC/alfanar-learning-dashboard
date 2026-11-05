@@ -13,7 +13,10 @@ export const baseTooltip = {
   borderWidth: 1,
   padding: [8, 12],
   textStyle: { color: INK.primary, fontSize: 12 },
-  extraCssText: 'box-shadow: 0 8px 24px rgba(15,23,42,.08); border-radius: 8px;',
+  // Keep the tooltip inside the chart (never cut off by card edges or the viewport) and let long
+  // module names wrap instead of widening the box past small screens.
+  confine: true,
+  extraCssText: 'box-shadow: 0 8px 24px rgba(15,23,42,.08); border-radius: 8px; max-width: min(320px, calc(100vw - 32px)); white-space: normal; overflow-wrap: anywhere;',
 }
 
 export const textStyle = { fontFamily: 'Inter, "Segoe UI", system-ui, sans-serif', color: INK.secondary }

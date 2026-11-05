@@ -35,7 +35,7 @@ const option = computed(() => ({
       const i = params[0]?.dataIndex ?? 0
       const title = escapeHtml(props.fullLabels?.[i] ?? props.categories[i])
       const lines = params.map((p) =>
-        `<div style="display:flex;gap:8px;align-items:center"><span style="width:8px;height:8px;border-radius:2px;background:${p.color}"></span>${escapeHtml(p.seriesName)}<b style="margin-left:auto;padding-left:12px">${p.value === null || p.value === undefined ? 'n/a' : p.value + props.unit}</b></div>`)
+        `<div style="display:flex;gap:8px;align-items:center"><span style="flex:none;width:8px;height:8px;border-radius:2px;background:${p.color}"></span>${escapeHtml(p.seriesName)}<b style="margin-left:auto;padding-left:12px">${p.value === null || p.value === undefined ? 'n/a' : p.value + props.unit}</b></div>`)
       const extra = (props.tooltipRows?.[i] ?? []).map((t) => `<div style="color:${INK.muted}">${escapeHtml(t)}</div>`)
       return `<div style="font-weight:600;margin-bottom:4px">${title}</div>${lines.join('')}${extra.length ? '<div style="margin-top:4px">' + extra.join('') + '</div>' : ''}`
     },
