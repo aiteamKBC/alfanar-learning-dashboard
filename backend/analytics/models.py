@@ -53,8 +53,14 @@ class Course(models.Model):
     class Meta:
         ordering = ["title"]
 
+    @property
+    def display_title(self):
+        from .course_labels import course_display_name
+
+        return course_display_name(self.source_id, self.title)
+
     def __str__(self):
-        return self.title
+        return self.display_title
 
 
 class Learner(models.Model):

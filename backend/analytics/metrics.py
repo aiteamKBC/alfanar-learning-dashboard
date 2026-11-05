@@ -237,11 +237,11 @@ def charts(course_id=None, engagement=None, activity_type=None) -> dict:
     kinds = [activity_type] if activity_type else [k.value for k in ActivityKind]
 
     module_progress, quiz_by_module, completion = [], [], []
-    for cid, ens in sorted(by_course.items(), key=lambda kv: courses[kv[0]].title):
+    for cid, ens in sorted(by_course.items(), key=lambda kv: courses[kv[0]].display_title):
         c = courses[cid]
         prog = [e.progress_pct for e in ens if e.progress_pct is not None]
         module_progress.append({
-            "course_id": c.source_id, "course": c.title, "enrollments": len(ens),
+            "course_id": c.source_id, "course": c.display_title, "enrollments": len(ens),
             "active": sum(1 for e in ens if stats[e.id]["has_activity"]),
             "mean_progress": _avg(prog), "median_progress": round(median(prog), 1) if prog else None,
             # Module-level facts (independent of learner filters):
@@ -255,13 +255,13 @@ def charts(course_id=None, engagement=None, activity_type=None) -> dict:
         attempted = sum(stats[e.id]["quizzes_attempted"] for e in ens)
         graded = sum(stats[e.id]["quizzes_graded"] for e in ens)
         quiz_by_module.append({
-            "course_id": c.source_id, "course": c.title, "known_quizzes": n_quiz,
+            "course_id": c.source_id, "course": c.display_title, "known_quizzes": n_quiz,
             "attempted_pairs": attempted, "possible_pairs": n_quiz * len(ens),
             "completion_pct": _pct(attempted, n_quiz * len(ens)),
             "mean_latest_score": _avg([v for e in ens for v in stats[e.id]["quiz_scores"]]),
             "pass_rate_pct": _pct(sum(stats[e.id]["quizzes_passed_latest"] for e in ens), graded),
         })
-        row = {"course_id": c.source_id, "course": c.title, "by_type": {}}
+        row = {"course_id": c.source_id, "course": c.display_title, "by_type": {}}
         for k in kinds:
             known = cat[cid].get(k, 0)
             if k == "quiz":
@@ -294,8 +294,8 @@ def charts(course_id=None, engagement=None, activity_type=None) -> dict:
     missing_progress = sum(1 for e in enrollments if e.progress_pct is None)
 
     # Learner x module progress matrix
-    module_cols = [{"course_id": courses[cid].source_id, "course": courses[cid].title}
-                   for cid in sorted(by_course, key=lambda c: courses[c].title)]
+    module_cols = [{"course_id": courses[cid].source_id, "course": courses[cid].display_title}
+                   for cid in sorted(by_course, key=lambda c: courses[c].display_title)]
     rows = defaultdict(dict)
     names = {}
     for e in enrollments:
@@ -327,7 +327,7 @@ def enrollment_payload(e: Enrollment, s: dict, cat, index: att.AttendanceIndex |
     known_a = cat[e.course_id].get("assignment", 0)
     return {
         "course_id": e.course.source_id,
-        "course": e.course.title,
+        "course": e.course.display_title,
         "progress_pct": e.progress_pct,
         "has_activity": s["has_activity"],
         "lessons_completed": s["lesson_total"],
@@ -531,7 +531,7 @@ def module_matrix(enrollment: Enrollment) -> dict:
                                 "attendance are not available.")
     return {
         "learner": {"learner_id": enrollment.learner.source_id, "name": enrollment.learner.name},
-        "course": {"course_id": enrollment.course.source_id, "title": enrollment.course.title,
+        "course": {"course_id": enrollment.course.source_id, "title": enrollment.course.display_title,
                    "progress_pct": enrollment.progress_pct},
         "matrix_basis": "activity",
         "matrix_note": ("Rows are the module's learning activities known from the export, in LMS item-ID order. "

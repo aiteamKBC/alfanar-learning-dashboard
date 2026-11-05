@@ -17,6 +17,7 @@ from collections import defaultdict
 
 from django.conf import settings
 
+from ..course_labels import course_display_name
 from ..models import AttendanceImportRun, LectureSession, SessionAttendance
 
 
@@ -102,7 +103,7 @@ class AttendanceIndex:
             rec = self.records.get((learner_sid, s["id"]))
             out.append({
                 "number": n, "date": s["session_date"], "starts_at": s["starts_at"], "ends_at": s["ends_at"],
-                "subject": s["meeting__subject"], "learners_attended": s["verified_learners"],
+                "subject": course_display_name(course_sid, s["meeting__subject"]), "learners_attended": s["verified_learners"],
                 "status": ("attended" if rec['attended'] else "absent") if rec and s['meeting__evidence_source'] == 'attendance_matrix'
                           else ("unavailable" if not rec and s['meeting__evidence_source'] == 'attendance_matrix'
                                 else ("attended" if rec and rec["attended"] else ("brief" if rec else "not_recorded"))),

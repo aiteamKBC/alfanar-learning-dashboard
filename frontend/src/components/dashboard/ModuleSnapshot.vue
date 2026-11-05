@@ -30,9 +30,9 @@ const cards = computed(() => props.progress.map((m) => ({ ...m, quiz: props.quiz
           :label="m.delivered_lectures.count === null ? 'Delivered lectures not available' : `${m.delivered_lectures.count} delivered lectures`" />
         <div class="min-w-0 flex-1">
           <div class="eyebrow flex items-center gap-1">Delivered Lectures
-            <InfoTip v-if="deliveredInfo" :text="deliveredInfo" label="About delivered lectures" />
+            <InfoTip v-if="deliveredInfo" :text="[deliveredInfo, m.delivered_lectures.note, m.delivered_lectures.source !== 'owner_confirmed' ? 'Lecture count comes from attendance evidence; total delivery is not independently confirmed.' : '', 'Attendance uses known observations only. Missing attendance is excluded.'].filter(Boolean).join(' ')" label="About delivered lectures" />
           </div>
-          <h3 class="mt-0.5 line-clamp-2 text-[14px] font-semibold leading-snug text-ink">{{ m.course }}</h3>        </div>
+          <h3 class="mt-0.5 text-[14px] font-semibold leading-snug text-ink">{{ m.course }}</h3>        </div>
       </div>
       <dl class="mt-4 grid grid-cols-3 gap-2 border-t border-line pt-3 text-[11.5px]">
         <div>

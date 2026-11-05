@@ -181,7 +181,7 @@ class NonLearnerExclusionTests(TestCase):
 
     def test_configured_ids(self):
         from analytics.importer.exclusions import NON_LEARNER_SOURCE_IDS
-        self.assertEqual(set(NON_LEARNER_SOURCE_IDS), {1, 17, 1267, 976, 450, 762})
+        self.assertEqual(set(NON_LEARNER_SOURCE_IDS), {1, 17, 1267, 976, 450, 762, 1057})
 
     def test_excluded_account_removed_everywhere_others_unchanged(self):
         from unittest import mock

@@ -15,4 +15,5 @@ NON_LEARNER_SOURCE_IDS: dict[int, str] = {
     976: "Owner-approved excluded account (2026-11-05)",
     450: "Owner-approved excluded account (2026-11-05)",
     762: "Owner-approved excluded account (2026-11-05)",
+    1057: "Owner-approved excluded account (2026-11-05)",
 }

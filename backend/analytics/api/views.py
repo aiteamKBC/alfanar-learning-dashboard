@@ -89,7 +89,8 @@ def auth_logout(request):
 @api_view(["GET"])
 def filters(request):
     return Response({
-        "courses": [{"course_id": c.source_id, "title": c.title} for c in Course.objects.order_by("title")],
+        "courses": [{"course_id": c.source_id, "title": c.display_title}
+                    for c in sorted(Course.objects.all(), key=lambda c: c.display_title)],
         "activity_types": [{"value": v, "label": l} for v, l in ActivityKind.choices],
         "engagement": [{"value": "active", "label": "Active in LMS"},
                        {"value": "inactive", "label": "No recorded LMS activity"}],

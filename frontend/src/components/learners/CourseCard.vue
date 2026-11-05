@@ -21,7 +21,7 @@ defineEmits<{ select: [] }>()
       <ProgressRing :value="course.progress_pct" :size="64" :stroke="6" :label="`LMS progress ${pct(course.progress_pct)}`" />
       <div class="min-w-0 flex-1">
         <div class="eyebrow">LMS progress</div>
-        <h3 class="mt-0.5 line-clamp-2 text-[13.5px] font-semibold leading-snug text-ink">{{ course.course }}</h3>
+        <h3 class="mt-0.5 text-[13.5px] font-semibold leading-snug text-ink">{{ course.course }}</h3>
         <span v-if="!course.has_activity" class="mt-1 inline-block rounded-full bg-subtle px-2 py-0.5 text-[10.5px] text-ink-3">No recorded activity</span>
       </div>
     </div>
