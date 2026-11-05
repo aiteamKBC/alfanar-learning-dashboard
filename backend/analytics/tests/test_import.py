@@ -174,3 +174,54 @@ class IdempotencyAndSyncTests(WorkbookFixtureMixin, TestCase):
         self.assertEqual(excel.counts(), google.counts())
         self.assertEqual(excel.quiz_results, google.quiz_results)
         self.assertEqual(excel.enrollments.keys(), google.enrollments.keys())
+
+
+class NonLearnerExclusionTests(TestCase):
+    """Configured non-learner LMS accounts are skipped by ID; nobody else is affected."""
+
+    def test_configured_ids(self):
+        from analytics.importer.exclusions import NON_LEARNER_SOURCE_IDS
+        self.assertEqual(set(NON_LEARNER_SOURCE_IDS), {1, 17})
+
+    def test_excluded_account_removed_everywhere_others_unchanged(self):
+        from unittest import mock
+        from analytics.importer import normalize as norm
+        with mock.patch.dict(norm.NON_LEARNER_SOURCE_IDS, {}, clear=True):
+            base = normalize(build_tables())
+        with mock.patch.dict(norm.NON_LEARNER_SOURCE_IDS, {101: "test non-learner"}, clear=True):
+            ds = normalize(build_tables())
+        self.assertNotIn(101, ds.learners)
+        self.assertEqual(set(ds.learners), set(base.learners) - {101})
+        for name in ("enrollments", "lesson_records", "quiz_results", "quiz_attempts"):
+            got = getattr(ds, name)
+            self.assertFalse([k for k in got if k[0] == 101], name)
+            self.assertEqual(got, {k: v for k, v in getattr(base, name).items() if k[0] != 101}, name)
+        self.assertFalse([s for s in ds.submissions.values() if s["uid"] == 101])
+        self.assertEqual(ds.excluded_non_learners["accounts"], 1)
+        # Skipped rows are not reported as orphans, and export cross-checks stay consistent
+        self.assertFalse([w for w in ds.warnings if "not in Students" in w])
+        self.assertEqual([w for w in ds.warnings if w.startswith("Cross-check")],
+                         [w for w in base.warnings if w.startswith("Cross-check")])
+
+    def test_sync_drops_excluded_learner_from_api(self):
+        from unittest import mock
+        from django.contrib.auth.models import User
+        from analytics.importer import normalize as norm
+        from analytics.models import DashboardAccess
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            path = str(write_workbook(tmp / "s.xlsx"))
+            run_sync("excel", path=path)
+            with mock.patch.dict(norm.NON_LEARNER_SOURCE_IDS, {103: "test non-learner"}, clear=True):
+                run_sync("excel", path=path)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        self.assertFalse(Learner.objects.filter(source_id=103).exists())
+        u = User.objects.create_user("viewer", password="not-a-real-pass-123")
+        DashboardAccess.objects.create(user=u)
+        self.client.force_login(u)
+        ids = {r["learner_id"] for r in self.client.get("/api/learners", HTTP_HOST="localhost").json()["results"]}
+        self.assertEqual(ids, {101, 102})
+        self.assertEqual(self.client.get("/api/learners/103", HTTP_HOST="localhost").status_code, 404)
+        k = self.client.get("/api/dashboard/summary", HTTP_HOST="localhost").json()["kpis"]
+        self.assertEqual(k["unique_learners"]["value"], 2)

@@ -22,6 +22,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 from ..models import ActivityKind
+from .exclusions import NON_LEARNER_SOURCE_IDS
 
 
 class ValidationFailed(Exception):
@@ -136,6 +137,7 @@ class Dataset:
     errors: list = field(default_factory=list)
     latest_activity_at: dt.datetime | None = None
     possible_duplicate_groups: list = field(default_factory=list)
+    excluded_non_learners: dict = field(default_factory=dict)  # aggregate counts of skipped non-learner rows
 
     def counts(self) -> dict:
         return {
@@ -212,12 +214,18 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
 
     # ---- Students -> learners, courses, enrollments ---------------------------------
     dup_enrol = 0
+    excluded: Counter = Counter()  # rows of configured non-learner accounts, per sheet / lesson kind
+    excluded_ids: set = set()
     sh = sheets["students"]
     for n, r in sh.records():
         try:
             uid, cid = to_int(r.get("User ID")), to_int(r.get("Course ID"))
             if uid is None or cid is None:
                 raise ValueError("missing User ID or Course ID")
+            if uid in NON_LEARNER_SOURCE_IDS:
+                excluded["students"] += 1
+                excluded_ids.add(uid)
+                continue
             name = clean_text(r.get("Name"))
             learner = {"name": name, "email": clean_text(r.get("Email"))}
             if uid in ds.learners and ds.learners[uid] != learner:
@@ -262,7 +270,13 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
     orphans: Counter = Counter()
     fact_rows: Counter = Counter()
 
-    def enrolled(sheet_title, uid, cid):
+    def enrolled(sheet_title, uid, cid, kind=None):
+        if uid in NON_LEARNER_SOURCE_IDS:  # configured non-learner: skipped, not an orphan
+            excluded[sheet_title] += 1
+            if kind is not None:
+                excluded[f"lesson:{kind}"] += 1
+            excluded_ids.add(uid)
+            return False
         fact_rows[sheet_title] += 1
         if (uid, cid) not in ds.enrollments:
             orphans[sheet_title] += 1
@@ -290,7 +304,7 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
             kind = LESSON_CATEGORY.get(cat)
             if kind is None:
                 raise ValueError(f"unknown lesson category {cat!r}")
-            if not enrolled(sh.title, uid, cid):
+            if not enrolled(sh.title, uid, cid, kind):
                 continue
             add_activity(cid, kind, sid, clean_text(r.get("Lesson Title")))
             time_source = clean_text(r.get("Time Source"))
@@ -438,6 +452,10 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
         ds.warnings.append(f"Submissions: {dup} duplicate submission IDs ignored")
 
     # ---- Validation ---------------------------------------------------------------------
+    ds.excluded_non_learners = {"accounts": len(excluded_ids), "rows": dict(excluded)}
+    if excluded_ids:
+        ds.warnings.append(f"Excluded {len(excluded_ids)} configured non-learner account(s) "
+                           f"({sum(v for k, v in excluded.items() if not k.startswith('lesson:'))} source rows) from learner data")
     for title, cnt in orphans.items():
         ds.warnings.append(f"{title}: {cnt} rows reference a learner/course not in Students and were skipped")
         if fact_rows[title] and cnt / fact_rows[title] > MAX_ORPHAN_RATIO:
@@ -489,6 +507,7 @@ def _cross_check(ds: Dataset, sheets: dict[str, _Sheet]):
     for sheet_key, kind in per_type.items():
         if sheet_key in sheets:
             n = len(sheets[sheet_key].rows)
+            n -= ds.excluded_non_learners.get("rows", {}).get(f"lesson:{kind}", 0)
             if n != lesson_counts.get(kind, 0):
                 ds.warnings.append(
                     f"Cross-check: '{sheets[sheet_key].title}' has {n} rows but Lesson Details has "
@@ -497,6 +516,8 @@ def _cross_check(ds: Dataset, sheets: dict[str, _Sheet]):
     if "all activities" in sheets:
         n = len(sheets["all activities"].rows)
         expected = len(ds.lesson_records) + len(ds.quiz_results) + len(ds.submissions)
+        rows = ds.excluded_non_learners.get("rows", {})
+        n -= sum(rows.get(sheets[k].title, 0) for k in ("lesson details", "quizzes", "submissions") if k in sheets)
         if n != expected:
             ds.warnings.append(f"Cross-check: All Activities has {n} rows; lessons+quizzes+submissions = {expected}")
 

@@ -14,6 +14,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from unittest import skipUnless
 
+from analytics.importer.exclusions import NON_LEARNER_SOURCE_IDS
 from analytics.importer.service import run_sync
 from analytics.models import DashboardAccess
 
@@ -26,7 +27,8 @@ def independent_totals(path: Path) -> dict:
     def rows(name):
         it = wb[name].iter_rows(values_only=True)
         hdr = next(it)
-        return [dict(zip(hdr, r)) for r in it if any(c not in (None, "") for c in r)]
+        out = [dict(zip(hdr, r)) for r in it if any(c not in (None, "") for c in r)]
+        return [r for r in out if r.get("User ID") not in NON_LEARNER_SOURCE_IDS]  # documented non-learners
 
     st = rows("Al Fanar Students")
     qa = rows("Al Fanar Quiz Attempts")

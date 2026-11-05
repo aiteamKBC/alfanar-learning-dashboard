@@ -22,7 +22,8 @@ The union sheets are never loaded, so nothing is double-counted. The importer ch
 
 ## Identifiers and relationships
 
-- `User ID` → Learner (44 unique). `Course ID` → Course (4). A learner in several modules is one Learner with several Enrollments (123).
+- `User ID` → Learner (44 unique in the export; 42 after excluding 2 non-learner accounts, see below). `Course ID` → Course (4). A learner in several modules is one Learner with several Enrollments (121 after the exclusion).
+- **Non-learner accounts:** User IDs listed in `backend/analytics/importer/exclusions.py` (a staff/manager account and a training-provider account, confirmed by the project owner) are skipped in every sheet during normalization. They never become learners, enrollments or learner activity, and so are also absent from the Teams learner registry. The source is never modified.
 - Quiz IDs (120), Lesson IDs (356) and Assignment IDs (4) are unique per course. An Activity's key is `(course, kind, source_id)`.
 - Every activity row matches an enrollment; there are 0 orphan rows.
 - No exact duplicate rows exist. The importer still de-duplicates on natural keys and logs a warning for any duplicate it skips.
