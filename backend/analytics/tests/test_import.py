@@ -225,3 +225,55 @@ class NonLearnerExclusionTests(TestCase):
         self.assertEqual(self.client.get("/api/learners/103", HTTP_HOST="localhost").status_code, 404)
         k = self.client.get("/api/dashboard/summary", HTTP_HOST="localhost").json()["kpis"]
         self.assertEqual(k["unique_learners"]["value"], 2)
+
+
+class LearnerMergeTests(TestCase):
+    """Verified duplicate accounts are attributed to one learner without losing any record."""
+
+    def test_configured_merges(self):
+        from analytics.importer.identities import MERGED_LEARNER_IDS
+        self.assertEqual(MERGED_LEARNER_IDS, {1056: 760, 1058: 753, 1062: 748, 779: 1229})
+        self.assertNotIn(743, MERGED_LEARNER_IDS)                       # unverified: kept separate
+        self.assertFalse(set(MERGED_LEARNER_IDS) & set(MERGED_LEARNER_IDS.values()))  # no chains
+
+    def _norm(self, merges, tables=None):
+        from unittest import mock
+        from analytics.importer import normalize as norm
+        with mock.patch.dict(norm.MERGED_LEARNER_IDS, merges, clear=True):
+            return normalize(tables or build_tables())
+
+    def test_merge_combines_modules_and_keeps_all_records(self):
+        base = self._norm({})
+        # 103 (only module 9002) is a duplicate of 102 (module 9001): disjoint activity, no collisions
+        ds = self._norm({103: 102})
+        self.assertEqual(set(ds.learners), {101, 102})
+        self.assertEqual(ds.learners[102], base.learners[102])          # canonical identity kept
+        self.assertEqual(ds.enrollments[(102, 9002)], base.enrollments[(103, 9002)])
+        self.assertEqual(ds.enrollments[(102, 9001)], base.enrollments[(102, 9001)])
+        for name in ("lesson_records", "quiz_results", "quiz_attempts"):
+            self.assertEqual(len(getattr(ds, name)), len(getattr(base, name)), name)  # nothing lost
+            self.assertFalse([k for k in getattr(ds, name) if k[0] == 103], name)
+        self.assertEqual(len(ds.submissions), len(base.submissions))
+        self.assertEqual(ds.merged_learners["accounts_merged"], 1)
+        self.assertEqual(ds.enrollments.keys() - {(102, 9002)}, base.enrollments.keys() - {(103, 9002)})
+
+    def test_same_module_enrollments_are_combined(self):
+        from .fixtures import STUDENT_HDR, _student
+        tables = build_tables()
+        row = _student(103, 9001, 30.0, submissions=2)                # duplicate account, same module as 101
+        row[STUDENT_HDR.index("User ID")] = 104.0
+        row[STUDENT_HDR.index("Email")] = "learner104@example.invalid"
+        tables["Al Fanar Students"].append(row)
+        ds = self._norm({104: 101}, tables)
+        base = self._norm({}, build_tables())
+        e, b = ds.enrollments[(101, 9001)], base.enrollments[(101, 9001)]
+        self.assertEqual(e["progress_pct"], max(30.0, b["progress_pct"]))   # higher LMS progress kept
+        self.assertEqual(e["reported_submissions"], (b["reported_submissions"] or 0) + 2)
+        self.assertNotIn(104, ds.learners)
+
+    def test_conflicting_activity_keeps_accounts_separate(self):
+        ds = self._norm({102: 101})   # both took quiz 701 in the fixture -> merge must be refused
+        self.assertIn(102, ds.learners)
+        self.assertIn(101, ds.learners)
+        self.assertTrue([w for w in ds.warnings if "merge 102 -> 101 skipped" in w])
+        self.assertEqual(ds.merged_learners["accounts_merged"], 0)

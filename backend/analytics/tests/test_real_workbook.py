@@ -15,6 +15,7 @@ from django.test import TestCase
 from unittest import skipUnless
 
 from analytics.importer.exclusions import NON_LEARNER_SOURCE_IDS
+from analytics.importer.identities import MERGED_LEARNER_IDS
 from analytics.importer.service import run_sync
 from analytics.models import DashboardAccess
 
@@ -28,7 +29,10 @@ def independent_totals(path: Path) -> dict:
         it = wb[name].iter_rows(values_only=True)
         hdr = next(it)
         out = [dict(zip(hdr, r)) for r in it if any(c not in (None, "") for c in r)]
-        return [r for r in out if r.get("User ID") not in NON_LEARNER_SOURCE_IDS]  # documented non-learners
+        out = [r for r in out if r.get("User ID") not in NON_LEARNER_SOURCE_IDS]  # documented non-learners
+        for r in out:  # verified duplicate accounts count as one learner
+            r["User ID"] = MERGED_LEARNER_IDS.get(r.get("User ID"), r.get("User ID"))
+        return out
 
     st = rows("Al Fanar Students")
     qa = rows("Al Fanar Quiz Attempts")
@@ -41,7 +45,12 @@ def independent_totals(path: Path) -> dict:
     activity_enrol = set()
     for name in ("Al Fanar Lesson Details", "Al Fanar Quiz Attempts", "Al Fanar Submissions"):
         activity_enrol |= {(r["User ID"], r["Course ID"]) for r in rows(name)}
-    progress = [r["Progress (%)"] for r in st if r["Progress (%)"] is not None]
+    best = {}  # one enrollment per learner/module; merged accounts keep the higher LMS progress
+    for r in st:
+        k, v = (r["User ID"], r["Course ID"]), r["Progress (%)"]
+        if v is not None:
+            best[k] = max(best.get(k, v), v)
+    progress = list(best.values())
     by_type = defaultdict(int)
     for r in rows("Al Fanar Lesson Details"):
         by_type[r["Category"].lower()] += 1

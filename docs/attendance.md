@@ -46,7 +46,7 @@ Everyone else is excluded from learner totals:
 
 Current results:
 - 30 learners matched by exact email.
-- 12 registry learners have no Teams match. Their attendance is **unknown, not absent**: they are shown as "Unknown · no Teams match" and excluded from attendance numerators and denominators.
+- 8 registry learners have no Teams match. Their attendance is **unknown, not absent**: they are shown as "Unknown · no Teams match" and excluded from attendance numerators and denominators.
 - 4 distinct unmatched learner-domain emails (20 rows) are flagged for review.
 - 1 name-only candidate was not accepted.
 
@@ -72,13 +72,13 @@ Rules live in `backend/analytics/attendance/mapping.py`. Any meeting that matche
 
 - **Delivered sessions per module:** PCP 17, Operations 9, Advanced 10.
 - **Attendance %** = attended delivered sessions ÷ delivered sessions of each enrolled module, summed over enrollments of learners with a matched Teams identity. It is only calculated for modules with a mapped meeting.
-  - Numerator: 667 learner-sessions with at least 10 minutes of merged presence.
-  - Denominator: 911 = delivered sessions × enrollments, over the 74 covered enrollments whose learner has a matched Teams identity.
-  - Overall: 667 / 911 = **73.2%** (live LMS data, 2026-11-05).
-  - Not counted: 15 covered enrollments (11 learners, 158 learner-sessions) with no matched Teams identity. Counting them as absent would give 667 / 1,069 = 62.4%, which is a lower bound, not the attendance rate.
+  - Numerator: 701 learner-sessions with at least 10 minutes of merged presence.
+  - Denominator: 948 = delivered sessions × enrollments, over the 77 covered enrollments whose learner has a matched Teams identity.
+  - Overall: 701 / 948 = **73.9%** (live LMS data, 2026-11-05, after merging verified duplicate accounts).
+  - Not counted: 12 covered enrollments (8 learners, 121 learner-sessions) with no matched Teams identity. Counting them as absent would give 701 / 1,069 = 65.6%, which is a lower bound, not the attendance rate.
 - **Live hours** = merged presence in delivered sessions (about 1,339 h).
 - **Caveats:**
-  - 15 covered enrollments belong to learners with no matched Teams identity. They are reported as unknown and excluded from the rate. Verified aliases would bring them in.
+  - 12 covered enrollments belong to learners with no matched Teams identity. They are reported as unknown and excluded from the rate. Verified aliases would bring them in.
   - The export runs to 4 Nov 2026, but the PCP meeting series has no reports after 14 Jan 2026. PCP has dated LMS recordings for 19 Jan to 2 Feb 2026, so any later PCP sessions held under this meeting are missing from the export, or ran under a different meeting link.
 - The dashboard totals were reconciled against an independent calculation from the raw workbook, and all figures matched exactly.
 

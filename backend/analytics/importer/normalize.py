@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 
 from ..models import ActivityKind
 from .exclusions import NON_LEARNER_SOURCE_IDS
+from .identities import MERGED_LEARNER_IDS
 
 
 class ValidationFailed(Exception):
@@ -138,6 +139,7 @@ class Dataset:
     latest_activity_at: dt.datetime | None = None
     possible_duplicate_groups: list = field(default_factory=list)
     excluded_non_learners: dict = field(default_factory=dict)  # aggregate counts of skipped non-learner rows
+    merged_learners: dict = field(default_factory=dict)        # aggregate counts of verified duplicate merges
 
     def counts(self) -> dict:
         return {
@@ -216,6 +218,14 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
     dup_enrol = 0
     excluded: Counter = Counter()  # rows of configured non-learner accounts, per sheet / lesson kind
     excluded_ids: set = set()
+    merges = _applicable_merges(sheets, ds)
+    merged: Counter = Counter()      # rows re-attributed from a duplicate account, per sheet
+    identities: dict = {}            # raw User ID -> identity (first row)
+    enrol_src: dict = {}             # (canonical uid, cid) -> raw User IDs that contributed
+
+    def canon(u):
+        return merges.get(u, u)
+
     sh = sheets["students"]
     for n, r in sh.records():
         try:
@@ -226,11 +236,14 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
                 excluded["students"] += 1
                 excluded_ids.add(uid)
                 continue
+            raw, uid = uid, canon(uid)
+            if raw != uid:
+                merged[sh.title] += 1
             name = clean_text(r.get("Name"))
             learner = {"name": name, "email": clean_text(r.get("Email"))}
-            if uid in ds.learners and ds.learners[uid] != learner:
-                ds.warnings.append(f"Learner {uid}: identity differs between rows; first value kept")
-            ds.learners.setdefault(uid, learner)
+            if raw in identities and identities[raw] != learner:
+                ds.warnings.append(f"Learner {raw}: identity differs between rows; first value kept")
+            identities.setdefault(raw, learner)
 
             course = {
                 "title": clean_text(r.get("Course")),
@@ -256,19 +269,34 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
                 "registered_at": to_datetime(r.get("Registered At")),
             }
             if (uid, cid) in ds.enrollments:
-                dup_enrol += 1
+                if raw in enrol_src[(uid, cid)]:
+                    dup_enrol += 1
+                    continue
+                # Same learner enrolled in this module under a verified duplicate account: combine.
+                ds.enrollments[(uid, cid)] = _combine_enrollments(ds.enrollments[(uid, cid)], enrol)
+                enrol_src[(uid, cid)].add(raw)
                 continue
             ds.enrollments[(uid, cid)] = enrol
+            enrol_src[(uid, cid)] = {raw}
         except (ValueError, TypeError) as exc:
             bad(sh.title, n, str(exc))
     if dup_enrol:
         ds.warnings.append(f"Students: {dup_enrol} duplicate learner/course rows ignored")
+    # One learner per canonical ID; the canonical account's own identity wins over a duplicate's.
+    for raw, ident in identities.items():
+        ds.learners[canon(raw)] = identities.get(canon(raw), ident)
     if not ds.enrollments:
         ds.errors.append("No enrollments found in Students worksheet")
         raise ValidationFailed(ds.errors, ds.warnings)
 
     orphans: Counter = Counter()
     fact_rows: Counter = Counter()
+
+    def _remap(u, sheet_title):
+        if u is not None and u in merges:
+            merged[sheet_title] += 1
+            return merges[u]
+        return u
 
     def enrolled(sheet_title, uid, cid, kind=None):
         if uid in NON_LEARNER_SOURCE_IDS:  # configured non-learner: skipped, not an orphan
@@ -297,7 +325,7 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
     dup = 0
     for n, r in sh.records():
         try:
-            uid, cid, sid = to_int(r.get("User ID")), to_int(r.get("Course ID")), to_int(r.get("Lesson ID"))
+            uid, cid, sid = _remap(to_int(r.get("User ID")), sh.title), to_int(r.get("Course ID")), to_int(r.get("Lesson ID"))
             if None in (uid, cid, sid):
                 raise ValueError("missing User ID, Course ID or Lesson ID")
             cat = clean_text(r.get("Category")).lower() or clean_text(r.get("Raw LMS Type")).lower()
@@ -336,7 +364,7 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
     dup = 0
     for n, r in sh.records():
         try:
-            uid, cid, qid = to_int(r.get("User ID")), to_int(r.get("Course ID")), to_int(r.get("Quiz ID"))
+            uid, cid, qid = _remap(to_int(r.get("User ID")), sh.title), to_int(r.get("Course ID")), to_int(r.get("Quiz ID"))
             if None in (uid, cid, qid):
                 raise ValueError("missing User ID, Course ID or Quiz ID")
             if not enrolled(sh.title, uid, cid):
@@ -360,7 +388,7 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
     dup = 0
     for n, r in sh.records():
         try:
-            uid, cid, qid = to_int(r.get("User ID")), to_int(r.get("Course ID")), to_int(r.get("Quiz ID"))
+            uid, cid, qid = _remap(to_int(r.get("User ID")), sh.title), to_int(r.get("Course ID")), to_int(r.get("Quiz ID"))
             num = to_int(r.get("Attempt #"))
             if None in (uid, cid, qid, num):
                 raise ValueError("missing User ID, Course ID, Quiz ID or Attempt #")
@@ -428,7 +456,7 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
     dup = 0
     for n, r in sh.records():
         try:
-            uid, cid = to_int(r.get("User ID")), to_int(r.get("Course ID"))
+            uid, cid = _remap(to_int(r.get("User ID")), sh.title), to_int(r.get("Course ID"))
             aid, sub_id = to_int(r.get("Assignment ID")), to_int(r.get("Submission ID"))
             if None in (uid, cid, aid, sub_id):
                 raise ValueError("missing User ID, Course ID, Assignment ID or Submission ID")
@@ -453,6 +481,11 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
 
     # ---- Validation ---------------------------------------------------------------------
     ds.excluded_non_learners = {"accounts": len(excluded_ids), "rows": dict(excluded)}
+    used = {d: c for d, c in merges.items() if d in identities}
+    ds.merged_learners = {"groups": len(set(used.values())), "accounts_merged": len(used), "rows": dict(merged)}
+    if used:
+        ds.warnings.append(f"Merged {len(used)} verified duplicate learner account(s) into {len(set(used.values()))} learner(s) "
+                           f"({sum(merged.values())} source rows re-attributed)")
     if excluded_ids:
         ds.warnings.append(f"Excluded {len(excluded_ids)} configured non-learner account(s) "
                            f"({sum(v for k, v in excluded.items() if not k.startswith('lesson:'))} source rows) from learner data")
@@ -473,6 +506,47 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
         raise ValidationFailed(ds.errors, ds.warnings)
     ds.warnings = list(dict.fromkeys(ds.warnings))
     return ds
+
+
+def _combine_enrollments(a: dict, b: dict) -> dict:
+    """Combine one learner's enrollment rows from two verified accounts in the same module (nothing dropped)."""
+    out = {}
+    for k in a:
+        x, y = a[k], b.get(k)
+        if x is None or y is None:
+            out[k] = x if y is None else y
+        elif k in ("progress_pct", "last_login"):
+            out[k] = max(x, y)
+        elif k == "registered_at":
+            out[k] = min(x, y)
+        else:  # LMS summary counters of the two accounts add up
+            out[k] = x + y
+    return out
+
+
+def _applicable_merges(sheets: dict, ds) -> dict[int, int]:
+    """Configured merges, minus any group whose accounts both hold a record for the same lesson or quiz
+    (merging those would need a choice between records, so the accounts are kept separate)."""
+    merges = dict(MERGED_LEARNER_IDS)
+    if not merges:
+        return merges
+    members = set(merges) | set(merges.values())
+    seen = defaultdict(set)
+    for key, item_col in (("lesson details", "Lesson ID"), ("quizzes", "Quiz ID"), ("quiz attempts", "Quiz ID")):
+        for _, r in sheets[key].records():
+            try:
+                uid, cid, item = to_int(r.get("User ID")), to_int(r.get("Course ID")), to_int(r.get(item_col))
+            except (ValueError, TypeError):
+                continue
+            if uid in members:
+                seen[(merges.get(uid, uid), key, cid, item)].add(uid)
+    conflicted = {k[0] for k, raws in seen.items() if len(raws) > 1}
+    for dup, c in list(merges.items()):
+        if c in conflicted:
+            del merges[dup]
+            ds.warnings.append(f"Learner merge {dup} -> {c} skipped: both accounts have records for the same "
+                               "lesson or quiz; kept as separate learners for review")
+    return merges
 
 
 def _identity_key(value: str) -> str:
