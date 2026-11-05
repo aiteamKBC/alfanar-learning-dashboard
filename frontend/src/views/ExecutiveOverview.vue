@@ -49,16 +49,6 @@ const allModules = useAsync(
 const k = computed(() => summary.data.value?.kpis)
 const defs = computed(() => summary.data.value?.definitions ?? charts.data.value?.definitions ?? {})
 const courseName = computed(() => filters.data.value?.courses.find((c) => String(c.course_id) === course.value)?.title)
-const attendanceNotice = computed(() => {
-  const modules = (allModules.data.value?.module_progress ?? []).filter((m) => !course.value || String(m.course_id) === course.value)
-  const limited = modules.find((m) => m.delivered_lectures.differs_from_teams)
-  const scope = limited
-    ? `${limited.course}: Only ${limited.delivered_sessions} of ${limited.delivered_lectures.count} confirmed lectures have attendance data. Module evidence coverage within those dated sessions is ${pct(limited.attendance.coverage_pct)}. The percentage does not describe attendance across all ${limited.delivered_lectures.count} lectures. `
-    : ''
-  const sessions = modules.length === 1 ? `${modules[0].delivered_sessions ?? 'Not Available'} sessions with attendance evidence. `
-    : (modules.length ? '' : 'Confirmed lecture and session coverage details are Not Available until module evidence loads. ')
-  return `${scope}${sessions}Rates use known observations from eligible learners with verified source identities only; missing attendance is excluded. Binary presence does not verify attendance duration.`
-})
 
 const kpiCards = computed(() => {
   const x = k.value
@@ -70,7 +60,6 @@ const kpiCards = computed(() => {
     x.attendance.available
       ? { label: 'Attendance (known evidence)', icon: 'users', tone: 'navy' as const, accent: '#142c52', value: pct(x.attendance.pct), meter: x.attendance.pct,
           sub: `${ratio(x.attendance.attended, x.attendance.expected)} present / known learner-session observations · ${pct(x.attendance.coverage_pct)} evidence coverage (${ratio(x.attendance.expected, x.attendance.possible_learner_sessions)} known / possible within dated sessions)`,
-          notice: attendanceNotice.value,
           info: `${defs.value.attendance} ${x.attendance.enrollments_without_teams_identity} of ${x.attendance.enrollments_covered} covered enrollments (${x.attendance.learners_without_teams_identity} learners) have no matched Teams identity: attendance unknown, excluded from this figure.` }
       : { label: 'Attendance (known evidence)', icon: 'users', tone: 'neutral' as const, value: 'Not Available', sub: 'No measurable attendance evidence for this selection', info: defs.value.attendance },
     { label: 'Mean latest quiz score', icon: 'target', tone: 'blue' as const, accent: '#2a78d6', value: pct(x.mean_latest_score.value), meter: x.mean_latest_score.value, sub: `Latest graded attempt across ${num(x.mean_latest_score.n)} learner–quiz results`, info: defs.value.mean_latest_score },
