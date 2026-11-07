@@ -527,7 +527,13 @@ def module_matrix(enrollment: Enrollment) -> dict:
     index = att.AttendanceIndex()
     learner_sid, course_sid = enrollment.learner.source_id, enrollment.course.source_id
     summary_att = index.enrollment(learner_sid, course_sid)
-    attendance = {**summary_att, "sessions": index.sessions_for(learner_sid, course_sid) if summary_att["available"] else []}
+    from .attendance.timing import attach_timing
+    matrix_calendar = any(s["meeting__evidence_source"] == "attendance_matrix"
+                          for s in index.sessions_by_course.get(course_sid, []))
+    sessions = index.sessions_for(learner_sid, course_sid) if summary_att["available"] or matrix_calendar else []
+    sessions = attach_timing(sessions, learner_sid, course_sid)
+    attendance = {**summary_att, "sessions": sessions,
+                  "timing_available": any(s["timing"]["available"] for s in sessions)}
     if not index.has_data(course_sid):
         attendance["reason"] = ("No Microsoft Teams meeting is mapped to this module, so delivered sessions and "
                                 "attendance are not available.")

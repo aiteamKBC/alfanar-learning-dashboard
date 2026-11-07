@@ -223,7 +223,16 @@ export interface LiveSession {
   first_join: string | null
   last_leave: string | null
   joins: number | null
+  timing: {
+    available: boolean
+    timezone: 'UTC'
+    first_join: string | null
+    last_leave: string | null
+    duration_seconds: number | null
+    visits: number | null
+  }
 }
 export interface MatrixAttendance extends EnrollmentAttendance {
   sessions: LiveSession[]
+  timing_available: boolean
 }

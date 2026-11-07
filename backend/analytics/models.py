@@ -277,6 +277,59 @@ class SessionAttendance(models.Model):
         constraints = [models.UniqueConstraint(fields=["session", "learner_source_id"], name="uniq_session_attendance")]
 
 
+class TimingImport(models.Model):
+    """Immutable timing snapshots; their evidence never updates binary attendance."""
+
+    fingerprint = models.CharField(max_length=64, unique=True)
+    source_name = models.CharField(max_length=300)
+    source_sha256 = models.CharField(max_length=64)
+    policy_sha256 = models.CharField(max_length=64)
+    registry_sha256 = models.CharField(max_length=64)
+    calendar_sha256 = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+    active = models.BooleanField(default=False)
+    counts = models.JSONField(default=dict)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["active"], condition=models.Q(active=True),
+                                               name="one_active_timing_import")]
+
+
+class LectureTiming(models.Model):
+    """Timing-only learner/date evidence, including records awaiting calendar review.
+
+    Source IDs deliberately do not cascade from LMS, matrix or lecture imports.
+    Only verified records attached to an existing lecture are exposed by the API.
+    """
+
+    class Status(models.TextChoices):
+        VERIFIED = "verified", "Verified lecture"
+        AMBIGUOUS_DATE = "ambiguous_date", "Ambiguous workbook date"
+        OFF_CALENDAR = "off_calendar", "No current lecture date"
+        DATE_REVIEW = "date_review", "Lecture date needs verification"
+        BOUNDARY_REVIEW = "boundary_review", "UTC date boundary needs review"
+
+    import_run = models.ForeignKey(TimingImport, on_delete=models.CASCADE, related_name="records")
+    course_source_id = models.BigIntegerField()
+    learner_source_id = models.BigIntegerField()
+    session_date = models.DateField()
+    status = models.CharField(max_length=30, choices=Status.choices)
+    first_join = models.DateTimeField()
+    last_leave = models.DateTimeField()
+    duration_microseconds = models.PositiveBigIntegerField()
+    visit_count = models.PositiveIntegerField()
+    # Original timestamps (including sub-microsecond precision), report/record/meeting
+    # IDs and match method. No names or email addresses are needed in this table.
+    provenance = models.JSONField(default=list)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["import_run", "course_source_id", "learner_source_id", "session_date"],
+            name="unique_timing_snapshot_pair")]
+        indexes = [models.Index(fields=["learner_source_id", "course_source_id", "status"],
+                                name="timing_learner_course")]
+
+
 class LearnerIdentity(models.Model):
     """Every retained LMS account and email, including approved merged identities."""
     source_id = models.BigIntegerField(unique=True)
