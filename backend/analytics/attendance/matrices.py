@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -42,12 +43,15 @@ def read_matrices(directory: Path, by_email, aliases, courses, enrollments):
         path = directory / filename
         if not path.is_file() or cid not in courses:
             raise AttendanceValidationError([f"Required authoritative source or LMS module missing: {filename} ({cid})"])
+        source_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
         with path.open('rb') as fh:
             wb = openpyxl.load_workbook(fh, read_only=True, data_only=True)
             try:
                 sheets = {s.title.strip(): list(s.values) for s in wb}
             finally:
                 wb.close()
+        if hashlib.sha256(path.read_bytes()).hexdigest() != source_sha256:
+            raise AttendanceValidationError([f"Attendance source changed while being read: {filename}"])
         rows = sheets.get(sheet_name)
         if not rows or len(rows) < 3 or rows[0][:2] != ('Name', 'Email'):
             raise AttendanceValidationError([f"Invalid attendance matrix: {filename}"])
@@ -125,7 +129,8 @@ def read_matrices(directory: Path, by_email, aliases, courses, enrollments):
                 'delivered': positive[day] > 0,
                 'exclusion_reason': '' if positive[day] else 'No verified positive attendance evidence',
             }
-        diagnostics[str(cid)] = {'source_file': filename, 'worksheets': list(sheets), 'dated_sessions': len(days),
+        diagnostics[str(cid)] = {'source_file': filename, 'source_sha256': source_sha256,
+                                 'worksheets': list(sheets), 'dated_sessions': len(days),
                                  'session_dates': [str(d) for d in sorted(days)], **counts,
                                  'unmatched_emails': len(unmatched), 'matched_learners_not_enrolled': len(ineligible),
                                  'matched_learners': len({lid for _, lid in cells})}

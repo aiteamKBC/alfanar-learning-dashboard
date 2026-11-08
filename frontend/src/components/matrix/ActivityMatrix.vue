@@ -258,7 +258,7 @@ const TF = 'border-t-2 border-line-strong bg-[#f6f5f1] px-3 py-3 align-top text-
               <td :class="TF" class="tabular"><b>{{ foot.submitted }} / {{ foot.assignment.known }}</b><div class="text-ink-3">submitted</div></td>
               <td :class="TF" class="tabular"><b>{{ foot.graded_assignments }}</b><div class="text-ink-3">graded</div></td>
             </template>
-            <td :class="TF" class="tabular"><b>{{ duration(foot.seconds) }}</b><div class="text-ink-3">{{ foot.timed }} LMS timers · unverified study time</div></td>
+            <td :class="TF" class="tabular"><b>{{ foot.timed ? duration(foot.seconds) : 'Not Available' }}</b><div class="text-ink-3">{{ foot.timed }} LMS timers · unverified study time</div></td>
           </tr>
         </tfoot>
       </table>

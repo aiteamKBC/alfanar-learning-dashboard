@@ -53,7 +53,6 @@ const courseName = computed(() => filters.data.value?.courses.find((c) => String
 const kpiCards = computed(() => {
   const x = k.value
   if (!x) return []
-  const status = Object.entries(x.submissions.by_status ?? {}).map(([s, n]) => `${n} ${s}`).join(' · ')
   return [
     { label: 'Active in LMS', icon: 'users', tone: 'neutral' as const, value: `${num(x.active_learners.value)} / ${num(x.unique_learners.value)}`, sub: `${num(x.enrollments.value)} enrollments · ${pct(x.active_learners.pct)} active`, info: defs.value.active_learners },
     { label: 'Mean LMS progress', icon: 'gauge', tone: 'teal' as const, value: pct(x.mean_progress.value), meter: x.mean_progress.value, sub: `Median ${pct(x.mean_progress.median)} · ${num(x.mean_progress.n)} enrollments`, info: defs.value.mean_progress },
@@ -64,7 +63,7 @@ const kpiCards = computed(() => {
       : { label: 'Attendance (known evidence)', icon: 'users', tone: 'neutral' as const, value: 'Not Available', sub: 'No measurable attendance evidence for this selection', info: defs.value.attendance },
     { label: 'Mean latest quiz score', icon: 'target', tone: 'blue' as const, accent: '#2a78d6', value: pct(x.mean_latest_score.value), meter: x.mean_latest_score.value, sub: `Latest graded attempt across ${num(x.mean_latest_score.n)} learner–quiz results`, info: defs.value.mean_latest_score },
     { label: 'Quiz pass rate', icon: 'award', tone: 'blue' as const, accent: '#2a78d6', value: pct(x.pass_rate.pct), meter: x.pass_rate.pct, sub: `${ratio(x.pass_rate.value ?? 0, x.pass_rate.denominator ?? 0)} latest attempts passed`, info: defs.value.pass_rate },
-    { label: 'Assignment submissions', icon: 'upload', tone: 'neutral' as const, accent: '#6b7489', value: num(x.submissions.value), meter: x.assignment_coverage.pct, sub: `${status || 'none'} · ${pct(x.assignment_coverage.pct)} of possible`, info: `${defs.value.submissions} ${defs.value.assignment_coverage}` },
+    { label: 'Assignment submissions', icon: 'upload', tone: 'neutral' as const, accent: '#6b7489', value: num(x.submissions.value), meter: x.assignment_coverage.pct, sub: `${ratio(x.assignment_coverage.value ?? 0, x.assignment_coverage.denominator ?? 0)} pairs · ${pct(x.assignment_coverage.pct)} coverage`, info: `${defs.value.submissions} ${defs.value.assignment_coverage}` },
   ]
 })
 

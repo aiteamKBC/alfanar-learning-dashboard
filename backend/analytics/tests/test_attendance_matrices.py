@@ -2,11 +2,12 @@ import datetime as dt
 import hashlib
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import openpyxl
 from django.test import TestCase, override_settings
 
-from analytics.attendance.importer import run_attendance_import
+from analytics.attendance.importer import AttendanceDataset, run_attendance_import
 from analytics.attendance.matrices import SOURCES, header_date
 from analytics.attendance.metrics import AttendanceIndex, aggregate
 from analytics.models import Course, Enrollment, Learner, LearnerIdentity, LectureSession, SessionAttendance
@@ -48,6 +49,7 @@ class AuthoritativeMatrixTests(TestCase):
         hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in self.root.glob('*.xlsx')}
         run = run_attendance_import()
         self.assertEqual(run.status, 'success', run.errors)
+        self.assertEqual({v['source_file']: v['source_sha256'] for v in run.diagnostics['sources'].values()}, hashes)
         index = AttendanceIndex()
         a = aggregate(index, [(u,c) for u in (101,102,103) for c in SOURCES])
         self.assertEqual((a['attended'], a['expected'], a['pct']), (4, 8, 50))
@@ -71,6 +73,28 @@ class AuthoritativeMatrixTests(TestCase):
         self.assertEqual(snapshot, list(SessionAttendance.objects.values_list('pk', 'attended')))
         self.assertEqual(LectureSession.objects.count(), 4)
 
+    def test_stale_workbook_cannot_remove_verified_dates_or_evidence(self):
+        path = self.root / SOURCES[135945][0]
+        wb = openpyxl.load_workbook(path)
+        ws = wb.active
+        ws.cell(1, 5, '07/10/2026')
+        ws.cell(2, 5, 'Attendance')
+        ws.cell(3, 5, 1)
+        wb.save(path)
+        wb.close()
+        self.assertEqual(run_attendance_import().status, 'success')
+        sessions = list(LectureSession.objects.order_by('id').values())
+        attendance = list(SessionAttendance.objects.order_by('id').values())
+        wb = openpyxl.load_workbook(path)
+        wb.active.delete_cols(5)
+        wb.save(path)
+        wb.close()
+        run = run_attendance_import()
+        self.assertEqual(run.status, 'failed')
+        self.assertIn('remove 1 existing matrix lecture dates', run.errors[0])
+        self.assertEqual(sessions, list(LectureSession.objects.order_by('id').values()))
+        self.assertEqual(attendance, list(SessionAttendance.objects.order_by('id').values()))
+
     def test_unregistered_exact_email_only_supplements_and_deduplicates(self):
         path = self.root / SOURCES[135945][0]
         wb = openpyxl.load_workbook(path)
@@ -84,3 +108,17 @@ class AuthoritativeMatrixTests(TestCase):
         self.assertEqual(run.status, 'success', run.errors)
         self.assertEqual(AttendanceIndex().enrollment(102,135945)['pct'], 100)
         self.assertFalse(AttendanceIndex().enrollment(103,135945)['available'])
+
+    def test_legacy_interval_import_cannot_replace_verified_matrix_calendar(self):
+        self.assertEqual(run_attendance_import().status, 'success')
+        original = list(SessionAttendance.objects.order_by('id').values())
+        legacy = self.root / 'synthetic-legacy.xlsx'
+        legacy.write_bytes(b'synthetic source; parsing isolated from calendar validation')
+        with patch('analytics.attendance.importer.read_workbook', return_value={}), patch(
+            'analytics.attendance.importer.build_dataset', return_value=AttendanceDataset()
+        ):
+            run = run_attendance_import(legacy)
+        self.assertEqual(run.status, 'failed')
+        self.assertIn('remove 4 existing matrix lecture dates', run.errors[0])
+        self.assertEqual(LectureSession.objects.count(), 4)
+        self.assertEqual(original, list(SessionAttendance.objects.order_by('id').values()))

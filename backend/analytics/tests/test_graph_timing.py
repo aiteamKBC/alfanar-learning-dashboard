@@ -371,7 +371,7 @@ class RiskMultiSeriesTests(TestCase):
         return LectureTiming.objects.get(import_run__active=True, course_source_id=121642,
                                          learner_source_id=uid, session_date=day)
 
-    def test_multiple_series_merge_overlaps_preserve_kpis_and_repeat_is_noop(self):
+    def test_multiple_series_merge_overlaps_preserve_lms_and_raw_flags_and_repeat_is_noop(self):
         before = (metrics.summary(), metrics.charts(), metrics.learner_directory(),
                   list(SessionAttendance.objects.order_by("id").values()))
         result = self.run_graph()
@@ -383,8 +383,8 @@ class RiskMultiSeriesTests(TestCase):
         other = LectureTiming.objects.get(import_run__active=True, course_source_id=9001,
                                            learner_source_id=101, session_date="2026-01-05")
         self.assertEqual(other.duration_microseconds, 2700 * 1_000_000)
-        self.assertEqual(before, (metrics.summary(), metrics.charts(), metrics.learner_directory(),
-                                  list(SessionAttendance.objects.order_by("id").values())))
+        self.assertEqual(fixture.without_attendance(before), fixture.without_attendance((metrics.summary(), metrics.charts(), metrics.learner_directory(),
+                                  list(SessionAttendance.objects.order_by("id").values()))))
         self.assertFalse(self.run_graph()["changed"])
 
     def test_metadata_404_and_failed_list_do_not_block_known_report_ids(self):

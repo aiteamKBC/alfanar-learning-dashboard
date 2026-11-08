@@ -38,7 +38,7 @@ DEFINITIONS = {
     "active_learners": "Active in LMS: learners with at least one recorded lesson, quiz attempt or assignment record (including drafts) in the selected modules. This is recorded LMS activity, not a measure of overall engagement.",
     "mean_progress": "Mean of the LMS-reported course progress (%) across enrollments. This is the LMS figure, not a qualification outcome.",
     "quiz_completion": "Learner-quiz pairs with at least one attempt ÷ (enrollments × quizzes known for that module). Known quizzes are those appearing in the export.",
-    "mean_latest_score": "Mean of each learner's latest graded attempt (highest Attempt #) per quiz. Quizzes never attempted are excluded, not counted as zero.",
+    "mean_latest_score": "Mean of each learner's latest graded attempt per quiz. Uses the highest source Attempt #; approved merged-account histories are ordered across accounts by timestamp, retaining the original attempts. Quizzes never attempted are excluded, not counted as zero.",
     "pass_rate": "Share of graded learner-quiz results whose latest graded attempt has source status 'passed'. Ungraded results are excluded. Pass marks are set per quiz by the LMS.",
     "submissions": "Assignment submission records. 'Submitted' excludes drafts.",
     "assignment_coverage": "Learner-assignment pairs with a non-draft submission ÷ (enrollments × assignments known for that module).",

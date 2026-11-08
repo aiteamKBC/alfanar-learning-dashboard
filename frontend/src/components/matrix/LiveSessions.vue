@@ -74,7 +74,7 @@ function timingDuration(seconds: number | null) {
             <th class="eyebrow border-b border-line px-3 py-2.5">Attendance</th>
             <th class="eyebrow border-b border-line px-3 py-2.5">First Join (UTC)</th>
             <th class="eyebrow border-b border-line px-3 py-2.5">Last Leave (UTC)</th>
-            <th class="eyebrow border-b border-line px-3 py-2.5">Total Attended Duration <InfoTip text="Hours:minutes:seconds from verified Teams intervals. Overlapping visits are counted once; gaps between visits are excluded. Timing does not change binary attendance." /></th>
+            <th class="eyebrow border-b border-line px-3 py-2.5">Total Attended Duration <InfoTip text="Hours:minutes:seconds from merged Teams intervals. Overlaps count once; gaps are excluded." /></th>
             <th class="eyebrow border-b border-line px-3 py-2.5">Learners attended</th>
           </tr>
         </thead>
@@ -86,6 +86,15 @@ function timingDuration(seconds: number | null) {
               <span class="inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset" :class="STATUS[s.status].cls">
                 <span aria-hidden="true">{{ STATUS[s.status].icon }}</span>{{ STATUS[s.status].label }}
               </span>
+              <div v-if="s.reconciliation?.corrected" class="mt-1 flex items-center gap-1 text-[11px] text-ink-2" data-attendance-reconciliation>
+                <span>Verified Teams<span v-if="s.reconciliation.matrix_status === 'absent'"> · Matrix: absent</span></span>
+              </div>
+              <div v-else-if="s.reconciliation?.needs_review" class="mt-1 flex items-center gap-1 text-[11px] text-amber-800" data-attendance-review>
+                <span>Review</span>
+              </div>
+              <div v-else-if="s.reconciliation?.reason_code === 'short_timing_unknown'" class="mt-1 flex items-center gap-1 text-[11px] text-ink-3" data-short-timing>
+                <span>Below {{ s.reconciliation.minimum_minutes }} min</span>
+              </div>
             </td>
             <td data-first-join class="border-b border-line px-3 py-2 text-ink-2 tabular">{{ timeOnly(s.timing.first_join) }}</td>
             <td data-last-leave class="border-b border-line px-3 py-2 text-ink-2 tabular">{{ timeOnly(s.timing.last_leave) }}</td>

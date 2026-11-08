@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, qs } from '@/api/client'
 import type { FiltersResponse, LearnerRow, Paginated } from '@/api/types'
@@ -27,12 +27,18 @@ const page = computed(() => Number(q('page', '1')) || 1)
 
 // Debounced search box bound to the URL
 const searchInput = ref(q('search'))
+const search = computed(() => q('search'))
 let timer: number | undefined
 watch(searchInput, (v) => {
   window.clearTimeout(timer)
+  if (v.trim() === search.value) return
   timer = window.setTimeout(() => setQuery({ search: v.trim() || undefined }), 250)
 })
-const search = computed(() => q('search'))
+watch(search, (v) => {
+  window.clearTimeout(timer)
+  searchInput.value = v
+})
+onBeforeUnmount(() => window.clearTimeout(timer))
 
 const filters = useAsync(() => api.get<FiltersResponse>('filters'))
 const list = useAsync(

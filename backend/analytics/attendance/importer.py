@@ -354,6 +354,18 @@ def run_attendance_import(path=None) -> AttendanceImportRun:
                                settings.TEAMS_MIN_LEARNERS_FOR_DELIVERED)
         ds.diagnostics["ambiguous_registry_emails"] = len(dup_emails)
         with transaction.atomic():
+            # A stale matrix or legacy interval export must not silently delete
+            # verified dates and hide timing that still references those dates.
+            existing = set(LectureSession.objects.filter(
+                meeting__evidence_source="attendance_matrix"
+            ).values_list("meeting__meeting_id", "session_date"))
+            removed = existing - set(ds.sessions)
+            if removed:
+                raise AttendanceValidationError([
+                    f"Attendance source would remove {len(removed)} existing matrix lecture dates. "
+                    "Use the latest verified workbooks; previous attendance was preserved. "
+                    "Calendar corrections require explicit evidence review."
+                ])
             stats = load_dataset(ds)
         run.diagnostics = {**ds.diagnostics, "load": stats}
         run.warnings = ds.warnings

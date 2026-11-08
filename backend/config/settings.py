@@ -163,6 +163,8 @@ TEAMS_ALIASES_PATH = _project_path(os.environ.get("TEAMS_ALIASES_PATH") or "data
 TEAMS_STAFF_DOMAINS = env_list("TEAMS_STAFF_DOMAINS", "kentbusinesscollege.com")
 # A learner "attended" a lecture with at least this much merged presence.
 TEAMS_MIN_ATTENDANCE_MINUTES = int(os.environ.get("TEAMS_MIN_ATTENDANCE_MINUTES", "10"))
+# Separate, explicit rule for reconciling verified timing with binary matrices.
+ATTENDANCE_RECONCILIATION_MIN_MINUTES = int(os.environ.get("ATTENDANCE_RECONCILIATION_MIN_MINUTES", "30"))
 # A lecture occurrence counts as "delivered" when at least this many verified learners attended it.
 TEAMS_MIN_LEARNERS_FOR_DELIVERED = int(os.environ.get("TEAMS_MIN_LEARNERS_FOR_DELIVERED", "5"))
 

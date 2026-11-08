@@ -1,6 +1,6 @@
-# Verified lecture timing release — actual production installation
+# Final verified dashboard release — 8 November 2026
 
-This is the authoritative runbook for this timing release. It replaces the former
+This is the authoritative runbook for the final timing and attendance reconciliation release. It replaces the former
 `/opt`, PostgreSQL and `alfanar-api` examples. These commands are for the authorized
 production operator. Local release preparation does not connect to or deploy production.
 
@@ -18,12 +18,14 @@ production operator. Local release preparation does not connect to or deploy pro
 | Verified timing | 1,048 learner–lecture pairs on 51 of 58 official lectures |
 | Visible pairs by module | Planning 367; Risk 238; Operations 292; Advanced 151 |
 | Pending timing | 347 off-calendar pairs; no lecture rows created |
+| Approved attendance rule | 30+ merged verified minutes = Present, including matrix Absent; owner approved 8 November 2026 |
+| Reconciliation | 160 corrections (156 missing + four matrix absences); 16 short-timing Review flags retained |
 | Migration | `analytics.0005_lecture_timing`, separate timing tables |
 | Dependencies | No new Python/Node dependency; existing lockfiles retained |
 
 **Git:** source, migration 0005, Graph integration, reconciliation rules, API/UI,
 synthetic tests and this runbook. **Private SCP:** unchanged Teams Excel 3 fallback,
-six-series policy, verified Graph snapshot, expected results, read-only deployment
+six-series policy, verified Graph snapshot, all four current attendance workbooks, expected results, read-only deployment
 verifier and supporting evidence. Never put workbooks, policies, private Meeting/Organizer
 IDs, caches, learner data, credentials, backups or private archives in Git/web roots.
 The private bundle contains no `.env`, database backup or Graph credential. Never
@@ -31,7 +33,7 @@ transfer the local database to production.
 
 The bundle includes `RELEASE_COMMIT`, `SHA256SUMS`, `expected-release.json`,
 `release_guard.py`, `timing-policy.json`, `PCP_Al_Fanar_Teams_Original_Data 3.xlsx`,
-`cache/` and `evidence/`. The external `TRANSFER-SHA256SUMS` verifies transfer integrity;
+`attendance/`, `cache/`, `owner-approval.json` and `evidence/`. The external `TRANSFER-SHA256SUMS` verifies transfer integrity;
 compare its commit with the delivery report too. The internal manifest covers every
 payload file. Caches are immutable provenance: the importer does not bootstrap an empty
 production timing database from an arbitrary cache file. If live historical access
@@ -40,7 +42,10 @@ cannot reproduce the verified release, stop; do not weaken the checks.
 Seven official slots remain unavailable: Risk 9 June and Operations 1 July 2026,
 plus two undated Risk and three undated Advanced slots. Do not invent undated rows
 or reassign Risk 8/10 June evidence to 9 June. This release includes no LMS sync,
-binary attendance re-import, calendar correction, identity edit or scheduler addition.
+calendar correction, identity edit or scheduler addition. Original matrix observations
+stay immutable; the shared attendance index applies the approved positive-timing rule.
+The previous timing-only package/guard is incompatible with these approved attendance
+outcomes. Use this final package and its verifier together.
 
 ## 1. Private SCP transfer
 
@@ -48,13 +53,17 @@ These Windows PowerShell commands are for the operator; they have not been execu
 against production. Transfer only these three files:
 
 ```powershell
-$releaseDir = 'D:\alfanar-learning-dashboard\data\lecture-timing-release-20261107'
-ssh root@72.62.133.105 'umask 077; mkdir -p /root/alfanar-timing-upload-20261107; chmod 700 /root/alfanar-timing-upload-20261107'
-scp -- "$releaseDir\alfanar-lecture-timing-private-20261107.tar.gz" "$releaseDir\TRANSFER-SHA256SUMS" "$releaseDir\RELEASE_COMMIT" root@72.62.133.105:/root/alfanar-timing-upload-20261107/
+$releaseDir = 'D:\alfanar-learning-dashboard\data\final-release-20261108'
+ssh root@72.62.133.105 'umask 077; mkdir -p /root/alfanar-final-upload-20261108; chmod 700 /root/alfanar-final-upload-20261108'
+scp -- "$releaseDir\alfanar-dashboard-private-20261108.tar.gz" "$releaseDir\TRANSFER-SHA256SUMS" "$releaseDir\RELEASE_COMMIT" root@72.62.133.105:/root/alfanar-final-upload-20261108/
 ```
 
-The four binary attendance workbooks are already installed and unchanged. Do not replace
-or re-import them. Preserve existing private timing caches.
+The archive includes the four verified workbooks, with the corrected 16-session
+Operations file. The existing production import was confirmed as 16 sessions.
+The baseline guard must verify its exact original observations and calendar before
+deployment. No matrix re-import is needed if that check passes. If it fails, stop and
+investigate the difference rather than overwrite production evidence. Preserve all
+existing attendance directories and private timing caches.
 
 ## 2. Verify paths, pinned source and private payload
 
@@ -69,7 +78,7 @@ python="$app/backend/venv/bin/python"
 env_file="$app/backend/.env"
 db="$app/backend/db.sqlite3"
 service=alfanar-gunicorn.service
-upload=/root/alfanar-timing-upload-20261107
+upload=/root/alfanar-final-upload-20261108
 test "$(id -u)" = 0
 test -d "$app/.git" && test -x "$python"
 test -f "$env_file" && test -f "$db"
@@ -94,11 +103,11 @@ git -C "$app" cat-file -e "$release_commit^{commit}"
 git -C "$app" merge-base --is-ancestor "$release_commit" origin/main
 git -C "$app" merge-base --is-ancestor HEAD "$release_commit"
 
-private="/var/lib/alfanar/timing/releases/$release_commit"
+private="/var/lib/alfanar/releases/$release_commit"
 test ! -e "$private"
 install -d -m 700 "$private"
-tar -tzf "$upload/alfanar-lecture-timing-private-20261107.tar.gz"
-tar --no-same-owner -xzf "$upload/alfanar-lecture-timing-private-20261107.tar.gz" -C "$private"
+tar -tzf "$upload/alfanar-dashboard-private-20261108.tar.gz"
+tar --no-same-owner -xzf "$upload/alfanar-dashboard-private-20261108.tar.gz" -C "$private"
 find "$private" -type d -exec chmod 700 {} +
 find "$private" -type f -exec chmod 600 {} +
 cd "$private"
@@ -117,7 +126,7 @@ create a scheduler. Keep writers stopped until all import and acceptance checks 
 
 ```bash
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
-backup="/var/backups/alfanar/timing-$stamp"
+backup="/var/backups/alfanar/final-$stamp"
 test ! -e "$backup"
 install -d -m 700 "$backup"
 printf '%s\n' "$backup" > "$private/LAST_BACKUP"
@@ -174,8 +183,10 @@ guard snapshot --app "$app" --database "$db" \
 ```
 
 The baseline must pass before updating source. It checks 27 learners, 103 enrollments,
-official lecture counts, binary attendance and LMS progress, and saves hashes of all
-non-timing analytics tables and dashboard summaries/charts for comparison.
+official lecture counts, exact original binary observations and 53 dated lectures,
+and saves hashes of every non-timing analytics table. Verification permits the approved
+effective-attendance changes while requiring all original attendance, academic and
+identity tables to remain identical. No local database is transferred.
 
 ## 4. Source, environment and migration
 
@@ -196,6 +207,32 @@ MICROSOFT_GRAPH_CLIENT_ID=
 MICROSOFT_GRAPH_CLIENT_SECRET=
 MICROSOFT_GRAPH_SCOPE=https://graph.microsoft.com/.default
 MICROSOFT_GRAPH_BASE_URL=https://graph.microsoft.com/v1.0
+```
+
+Set these two non-secret values in the existing backend environment. The command
+preserves other values; the original file is already backed up. The private path
+selects the verified 16-session Operations workbook for future default imports.
+
+```bash
+"$python" - "$env_file" "$private/attendance" <<'PY'
+import sys
+from dotenv import set_key
+set_key(sys.argv[1], 'ATTENDANCE_DIRECTORY', sys.argv[2], quote_mode='always')
+set_key(sys.argv[1], 'ATTENDANCE_RECONCILIATION_MIN_MINUTES', '30', quote_mode='never')
+PY
+chmod 600 "$env_file"
+```
+
+Check for conflicting systemd environment overrides without printing secrets:
+
+```bash
+"$python" - "$service" <<'PY'
+import shlex, subprocess, sys
+values = shlex.split(subprocess.check_output(['systemctl', 'show', sys.argv[1], '-p', 'Environment', '--value'], text=True))
+blocked = {'ATTENDANCE_DIRECTORY', 'ATTENDANCE_RECONCILIATION_MIN_MINUTES'}
+assert not any(v.split('=', 1)[0] in blocked for v in values), 'Review conflicting attendance service overrides before proceeding.'
+print('Attendance service override check: ok')
+PY
 ```
 
 The app needs admin-consented `OnlineMeetingArtifact.Read.All` and an application
@@ -245,11 +282,20 @@ guard verify --app "$app" --database "$db" \
 
 Every guard must print `PASS`. On failure, leave the service stopped and investigate
 or roll back; do not force counts. Verification compares exact timing rows, timestamps
-and durations as well as 1,048 visible pairs, 51 dates, 347 pending pairs and every
-original non-timing table/KPI. The two dated missing lectures stay unavailable; the
+and durations as well as 1,048 visible pairs, 51 dates, 347 pending pairs, all original
+non-timing tables, 160 corrections, 16 reviews, every learner decision and all final
+module/overall KPIs and charts. The two dated missing timing lectures stay unavailable; the
 five undated slots receive no fabricated dates. Repeat must return `changed=false`.
 Dry run writes only private Graph evidence. Incomplete first-deployment Graph results
 cannot pass the release checks; existing verified history is preserved on refresh.
+
+Record the immutable private decision ledger after the successful import:
+
+```bash
+run_manage audit_attendance_reconciliation --output "$backup/attendance-decisions.json"
+run_manage audit_attendance_reconciliation --output "$backup/attendance-decisions.json"
+# The second ledger write must report changed=false.
+```
 
 ## 6. Frontend and acceptance
 
@@ -264,20 +310,26 @@ systemctl status "$service" --no-pager
 
 Sign in at the existing HTTPS dashboard. Check Learner Detail → Module → Live Sessions
 in all modules, recovered dates, repeated joins, UTC labels and total duration. Check
-recorded absence with timing and missing binary observations; timing must not alter
-their statuses. Risk 9 June and Operations 1 July must show `Not Available`. Do not
+recorded absence with qualifying timing and missing matrix observations: verified
+30+ merged minutes must show Present, including the four original matrix absences.
+Original absence labels and the 16 short-timing Review flags remain concise. Use
+the verified learner examples in the private QA evidence. Risk 9 June and Operations
+1 July timing fields must show `Not Available`; valid matrix attendance still applies. Do not
 invent rows for the five undated slots. Confirm module order, 16/14/16/12 lectures and
 removal of Overview attendance descriptions. Anonymous timing access stays forbidden.
 
-| Module | Binary present / known | Attendance | Evidence coverage | Timing dates |
+| Module | Effective present / known | Attendance | Evidence coverage | Timing dates |
 |---|---:|---:|---:|---:|
-| Planning | 308 / 336 | 91.7% | 80.8% | 16 / 16 official |
-| Procurement Risk | 247 / 286 | 86.4% | 88.3% | 11 / 14 official |
-| Operations | 237 / 324 | 73.1% | 77.9% | 15 / 16 official |
-| Advanced | 128 / 128 | 100% of known observations | 59.3% | 9 / 12 official |
+| Planning | 369 / 397 | 92.9% | 95.4% (397 / 416) | 16 / 16 official |
+| Procurement Risk | 255 / 290 | 87.9% | 89.5% (290 / 324) | 11 / 14 official |
+| Operations | 307 / 394 | 77.9% | 94.7% (394 / 416) | 15 / 16 official |
+| Advanced | 149 / 149 | 100% of known observations | 69.0% (149 / 216) | 9 / 12 official |
 
-Overall binary attendance stays 920/1,074 = 85.7%, evidence coverage 78.3%, mean LMS
-progress 38.8%, and the registry 27 learners/103 enrollments. Keep the official 58
+Overall effective attendance is 1,080/1,230 = 87.8%, evidence coverage 89.7%. Original
+binary records remain unchanged; only the approved reconciliation affects displayed
+attendance. Mean LMS progress remains 38.8%, and the registry 27 learners/103 enrollments.
+Keep the approved clean UI: no new explanatory paragraphs, warnings or banners;
+detailed findings belong in private QA evidence. Keep the official 58
 lectures distinct from 53 existing attendance dates and 51 dates with timing.
 After acceptance, resume only previously active units and external writers:
 

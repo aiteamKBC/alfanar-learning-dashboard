@@ -47,7 +47,7 @@ defineEmits<{ select: [] }>()
           <template v-else>Not Available</template>
         </span>
       </div>
-      <p v-if="course.attendance.missing" class="mt-1 text-[10.5px] text-amber-800">{{ course.attendance.missing }} sessions have no attendance evidence</p>
+      <p v-if="course.attendance.missing" class="mt-1 text-[10.5px] text-amber-800">{{ course.attendance.missing }} session{{ course.attendance.missing === 1 ? '' : 's' }} with attendance Not Available</p>
       <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-subtle"><div class="h-full rounded-full bg-navy" :style="{ width: `${course.attendance.pct ?? 0}%` }" /></div>
       <p class="mt-1 text-[10.5px] text-ink-3">Learner rate: known observations only; missing attendance is excluded.</p>
       <AttendanceScope v-if="module" :module="module" />

@@ -223,6 +223,18 @@ export interface LiveSession {
   first_join: string | null
   last_leave: string | null
   joins: number | null
+  reconciliation: {
+    minimum_minutes: number
+    matrix_status: 'present' | 'absent' | 'not_available'
+    corrected: boolean
+    conflict: boolean
+    needs_review: boolean
+    reason: string
+    reason_code: string
+    source: string
+    timing_qualifies: boolean
+    effective_present: boolean | null
+  } | null
   timing: {
     available: boolean
     timezone: 'UTC'

@@ -32,7 +32,7 @@ const BUBBLE = {
     <div class="relative flex items-start justify-between gap-3">
       <div class="min-w-0">
         <div class="eyebrow flex items-center gap-1.5">
-          <span class="truncate">{{ label }}</span>
+          <span class="min-w-0 whitespace-normal">{{ label }}</span>
           <InfoTip v-if="info" :text="info" :label="`About: ${label}`" />
         </div>
         <div class="font-heading mt-2 text-[27px] font-semibold leading-none tracking-tight text-ink tabular">{{ value }}</div>

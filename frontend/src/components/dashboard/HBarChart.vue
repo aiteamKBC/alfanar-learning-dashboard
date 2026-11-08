@@ -31,6 +31,18 @@ const option = computed(() => ({
     ...baseTooltip,
     trigger: 'axis',
     axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(15,23,42,0.04)' } },
+    position: (point: number[], _params: unknown, dom: HTMLElement, _rect: unknown, size: { viewSize: number[] }) => {
+      // A wide chart can be scrolled on mobile. Keep the tooltip within the
+      // currently visible part, rather than the full SVG plotting width.
+      const scroll = dom.closest<HTMLElement>('.chart-scroll')
+      const left = scroll?.scrollLeft ?? 0
+      const width = scroll?.clientWidth ?? size.viewSize[0] ?? 0
+      dom.style.maxWidth = `${Math.max(1, width - 16)}px`
+      return [
+        Math.max(left + 8, Math.min((point[0] ?? 0) + 12, left + width - dom.offsetWidth - 8)),
+        Math.max(8, Math.min((point[1] ?? 0) + 12, (size.viewSize[1] ?? 0) - dom.offsetHeight - 8)),
+      ]
+    },
     formatter: (params: { dataIndex: number; seriesName: string; value: number | null; color: string }[]) => {
       const i = params[0]?.dataIndex ?? 0
       const title = escapeHtml(props.fullLabels?.[i] ?? props.categories[i])
@@ -61,5 +73,7 @@ const option = computed(() => ({
 </script>
 
 <template>
-  <VChart :option="option" :style="{ height: `${h}px`, width: '100%' }" autoresize />
+  <div class="chart-scroll overflow-x-auto" role="region" aria-label="Module comparison chart; scroll horizontally on small screens" tabindex="0">
+    <VChart :option="option" :style="{ height: `${h}px`, width: '100%', minWidth: '520px' }" autoresize />
+  </div>
 </template>

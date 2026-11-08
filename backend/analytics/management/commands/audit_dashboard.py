@@ -15,7 +15,7 @@ from analytics import metrics
 from analytics.importer.exclusions import NON_LEARNER_SOURCE_IDS
 from analytics.importer.identities import MERGED_LEARNER_IDS
 from analytics.importer.service import fetch_source
-from analytics.models import AcademicEvidence, Enrollment, Learner, LearnerIdentity, LessonRecord, QuizAttempt, SessionAttendance, Submission
+from analytics.models import AcademicEvidence, Enrollment, Learner, LearnerIdentity, LessonRecord, LectureTiming, QuizAttempt, SessionAttendance, Submission
 
 
 class Command(BaseCommand):
@@ -233,11 +233,32 @@ class Command(BaseCommand):
         db_cells={(a.learner_source_id,a.session.meeting.course_source_id,a.session.session_date):int(a.attended)
                   for a in SessionAttendance.objects.select_related('session__meeting')}
         check('attendance.every_source_cell_reconciled',db_cells==cells,True)
+        # Independently derive effective observations from retained source cells and
+        # an event sweep of verified interval provenance, not AttendanceIndex/decide.
+        effective_cells = dict(cells)
+        threshold = settings.ATTENDANCE_RECONCILIATION_MIN_MINUTES * 60 * 1_000_000
+        from analytics.attendance.timing import AMBIGUOUS_DATES
+        for timing in LectureTiming.objects.filter(import_run__active=True, status='verified'):
+            uid,cid,day = timing.learner_source_id,timing.course_source_id,timing.session_date
+            if (uid,cid) not in ens or day not in dates.get(cid,[]) or (cid,day) in AMBIGUOUS_DATES:
+                continue
+            events = Counter()
+            for interval in timing.provenance:
+                a=dt.datetime.fromisoformat(interval['join'].replace('Z','+00:00'))
+                b=dt.datetime.fromisoformat(interval['leave'].replace('Z','+00:00'))
+                events[a]+=1;events[b]-=1
+            depth=0;previous=None;duration=dt.timedelta()
+            for stamp,delta in sorted(events.items()):
+                if depth and previous is not None:duration+=stamp-previous
+                depth+=delta;previous=stamp
+            micros=(duration.days*86400+duration.seconds)*1_000_000+duration.microseconds
+            check(f'attendance.timing_union.{uid}.{cid}.{day}',timing.duration_microseconds,micros)
+            if micros>=threshold:effective_cells[(uid,cid,day)]=1
         chart=metrics.charts()
         modules=[]
         for row in chart['module_progress']:
             cid=row['course_id']; pairs={p for p in ens if p[1]==cid}
-            known={(u,c,d):v for (u,c,d),v in cells.items() if (u,c) in pairs}
+            known={(u,c,d):v for (u,c,d),v in effective_cells.items() if (u,c) in pairs}
             possible=len(pairs)*len(dates[cid])
             n=sum(known.values());den=len(known)
             check(f'module.{cid}.enrollments',row['enrollments'],len(pairs))
@@ -269,7 +290,7 @@ class Command(BaseCommand):
                             'attendance_pct':pct(n,den),'possible_learner_sessions':possible,'evidence_coverage_pct':pct(den,possible),
                             'measured_enrollments':len({(u,c) for u,c,d in known}),
                             'missing_learner_sessions':possible-den,'dates':[str(d) for d in dates[cid]]})
-        eligible={(u,c,d):v for (u,c,d),v in cells.items() if (u,c) in ens}
+        eligible={(u,c,d):v for (u,c,d),v in effective_cells.items() if (u,c) in ens}
         check('overview.attendance.numerator',k['attendance']['attended'],sum(eligible.values()))
         check('overview.attendance.denominator',k['attendance']['expected'],len(eligible))
         for row in chart['activity_by_type']:

@@ -28,6 +28,15 @@ REPORTS = [(s, "2026-01-05T08:55:00Z" if rid == "R1" else a, b, rid, mid)
            for s, a, b, rid, mid in BASE_REPORTS]
 
 
+def without_attendance(value):
+    """The reconciliation feature may change attendance, never the LMS payload."""
+    if isinstance(value, dict):
+        return {k: without_attendance(v) for k, v in value.items() if k != "attendance"}
+    if isinstance(value, (list, tuple)):
+        return [without_attendance(v) for v in value]
+    return value
+
+
 class LectureTimingTests(TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -89,7 +98,7 @@ class LectureTimingTests(TestCase):
         self.assertEqual(self.record(102).duration_microseconds, 30 * 60 * 1_000_000)
         self.assertEqual({r["report_id"] for r in rec.provenance}, {"R1", "R1b"})
 
-    def test_alias_is_timing_only_and_preserves_binary_absence_and_all_kpis(self):
+    def test_alias_preserves_raw_absence_and_lms_while_reconciling_effective_attendance(self):
         self.add_verified_alias()
         before = (metrics.summary(), metrics.charts(), metrics.learner_directory(),
                   [metrics.learner_detail(l) for l in self.learners.values()])
@@ -97,10 +106,12 @@ class LectureTimingTests(TestCase):
         self.run_import()
         self.assertEqual(self.record(102).duration_microseconds, 50 * 60 * 1_000_000)
         self.assertEqual(attendance, list(SessionAttendance.objects.order_by("id").values()))
-        self.assertEqual(before, (metrics.summary(), metrics.charts(), metrics.learner_directory(),
-                                 [metrics.learner_detail(l) for l in self.learners.values()]))
+        self.assertEqual(without_attendance(before), without_attendance((metrics.summary(), metrics.charts(), metrics.learner_directory(),
+                                 [metrics.learner_detail(l) for l in self.learners.values()])))
         matrix = metrics.module_matrix(Enrollment.objects.get(learner=self.learners[102]))
-        self.assertEqual(matrix["attendance"]["sessions"][0]["status"], "absent")
+        self.assertEqual(matrix["attendance"]["sessions"][0]["status"], "attended")
+        self.assertEqual(matrix["attendance"]["sessions"][0]["reconciliation"]["matrix_status"], "absent")
+        self.assertTrue(matrix["attendance"]["sessions"][0]["reconciliation"]["conflict"])
         self.assertTrue(matrix["attendance"]["sessions"][0]["timing"]["available"])
         self.assertIsNone(matrix["attendance"]["live_seconds"])
 
@@ -180,7 +191,7 @@ class LectureTimingTests(TestCase):
         self.assertEqual((result["ambiguous_date"], result["verified"]), (0, 4))
         data = metrics.module_matrix(Enrollment.objects.get(learner=self.learners[101], course=advanced))["attendance"]
         self.assertTrue(all(s["timing"]["duration_seconds"] == 3600 for s in data["sessions"]))
-        self.assertEqual(before, metrics.summary())
+        self.assertEqual(without_attendance(before), without_attendance(metrics.summary()))
         self.assertFalse(self.run_import()["changed"])
 
     def test_unresolved_date_hold_still_overrides_policy_approval(self):
@@ -306,9 +317,10 @@ class LectureTimingTests(TestCase):
         LectureSession.objects.create(meeting=self.meeting, session_date="2026-01-05", delivered=True,
                                       report_count=1, verified_learners=1)
         data = metrics.module_matrix(enrollment)["attendance"]
-        self.assertFalse(data["available"])
+        self.assertTrue(data["available"])
         self.assertEqual(data["sessions"][0]["timing"]["duration_seconds"], 2700)
-        self.assertEqual(data["sessions"][0]["status"], "unavailable")
+        self.assertEqual(data["sessions"][0]["status"], "attended")
+        self.assertEqual(data["sessions"][0]["reconciliation"]["reason_code"], "timing_fills_missing")
 
     def test_private_provenance_is_not_in_authenticated_api_and_auth_stays_required(self):
         self.run_import()
