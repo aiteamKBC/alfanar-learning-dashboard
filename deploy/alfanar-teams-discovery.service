@@ -17,6 +17,8 @@ StateDirectory=alfanar-teams
 StateDirectoryMode=0700
 UMask=0077
 ExecStart=/var/www/alfanar-learning-dashboard/backend/venv/bin/python manage.py sync_teams_lectures
+# Disabled by default; only runs after the preceding Teams command succeeds.
+ExecStart=/var/www/alfanar-learning-dashboard/backend/venv/bin/python manage.py export_master_attendance --write --if-enabled
 TimeoutStartSec=45min
 Restart=on-failure
 RestartSec=15min
