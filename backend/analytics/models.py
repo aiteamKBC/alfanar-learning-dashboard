@@ -348,3 +348,77 @@ class AcademicEvidence(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["sheet", "row_number"], name="uniq_academic_evidence")]
+
+
+class TeamsDiscoveryState(models.Model):
+    """Durable checkpoints; historical cutover is immutable after initialization."""
+    key = models.CharField(max_length=40, primary_key=True)
+    cutover_at = models.DateTimeField()
+    checkpoints = models.JSONField(default=dict)
+    pending_events = models.JSONField(default=dict)
+    baseline_sha256 = models.CharField(max_length=64)
+
+
+class TeamsDiscoveryRun(models.Model):
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True)
+    status = models.CharField(max_length=20, default="running")
+    counts = models.JSONField(default=dict)
+    diagnostics = models.JSONField(default=list)
+
+
+class TeamsDiscoveredSeries(models.Model):
+    """Private Graph identifiers, bound to an approved organizer/course relationship."""
+    organizer_id = models.CharField(max_length=100)
+    meeting_id = models.CharField(max_length=1024)
+    course_source_id = models.BigIntegerField()
+    subject = models.CharField(max_length=500)
+    join_url = models.TextField(blank=True)
+    provenance = models.JSONField(default=dict)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["organizer_id", "meeting_id"], name="unique_discovery_series")]
+
+
+class TeamsOccurrence(models.Model):
+    """One canonical calendar occurrence, never one row per report or per date."""
+    key = models.CharField(max_length=64, unique=True)
+    series = models.ForeignKey(TeamsDiscoveredSeries, on_delete=models.PROTECT, related_name="occurrences")
+    course_source_id = models.BigIntegerField()
+    calendar_uid = models.TextField()
+    scheduled_start = models.DateTimeField()
+    scheduled_end = models.DateTimeField()
+    starts_at = models.DateTimeField(null=True)
+    ends_at = models.DateTimeField(null=True)
+    status = models.CharField(max_length=20, default="pending")
+    reason = models.CharField(max_length=80, default="awaiting_complete_report")
+    provenance = models.JSONField(default=dict)
+    needs_review = models.BooleanField(default=False)
+
+
+class TeamsReportEvidence(models.Model):
+    """Immutable report revisions, including rejected/partial replies, for private audit."""
+    series = models.ForeignKey(TeamsDiscoveredSeries, on_delete=models.PROTECT, related_name="reports")
+    report_id = models.CharField(max_length=1024)
+    sha256 = models.CharField(max_length=64)
+    payload = models.JSONField()
+    complete = models.BooleanField()
+    retrieved_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["series", "report_id", "sha256"], name="unique_discovery_report_revision")]
+
+
+class TeamsOccurrenceAttendance(models.Model):
+    occurrence = models.ForeignKey(TeamsOccurrence, on_delete=models.PROTECT, related_name="attendance")
+    learner_source_id = models.BigIntegerField()
+    first_join = models.DateTimeField()
+    last_leave = models.DateTimeField()
+    duration_microseconds = models.PositiveBigIntegerField()
+    visit_count = models.PositiveIntegerField()
+    intervals = models.JSONField(default=list)
+    evidence_sha256 = models.CharField(max_length=64)
+    needs_review = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["occurrence", "learner_source_id"], name="unique_discovery_learner_occurrence")]

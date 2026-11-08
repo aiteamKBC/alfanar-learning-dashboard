@@ -20,7 +20,9 @@ export interface Summary {
 
 export interface DeliveredLectures {
   count: number | null
-  source: 'owner_confirmed' | 'teams' | 'attendance_matrix' | null
+  source: 'owner_confirmed' | 'owner_confirmed_plus_verified' | 'teams' | 'attendance_matrix' | null
+  historical_count?: number
+  new_occurrences?: number
   teams_sessions: number | null
   differs_from_teams: boolean
   confirmed_by?: string
@@ -213,12 +215,13 @@ export interface RollupAttendance {
 }
 export interface LiveSession {
   number: number
+  occurrence_key?: string
   date: string
   starts_at: string
   ends_at: string
   subject: string
   learners_attended: number
-  status: 'attended' | 'brief' | 'not_recorded' | 'absent' | 'unavailable'
+  status: 'attended' | 'brief' | 'not_recorded' | 'absent' | 'unavailable' | 'review'
   presence_seconds: number | null
   first_join: string | null
   last_leave: string | null

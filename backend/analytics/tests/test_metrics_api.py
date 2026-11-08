@@ -171,5 +171,5 @@ class LearnerApiTests(ApiTestBase):
         self.assertEqual(self.client.get("/api/learners/103/courses/9001/matrix").status_code, 404)
 
     def test_query_count_bounded(self):
-        with self.assertNumQueries(11):  # +1 access check, +2 attendance index (constant)
+        with self.assertNumQueries(12):  # +1 access check, +3 historical/new occurrence index (constant)
             self.client.get("/api/learners")

@@ -506,6 +506,15 @@ class GraphClientTests(SimpleTestCase):
         self.assertIn("ApplicationAccessPolicyMissing", str(caught.exception))
         self.assertNotIn("private@example.invalid", str(caught.exception))
 
+    def test_transient_server_failures_retry_with_bounded_backoff(self):
+        for status in (500, 502, 503, 504):
+            with self.subTest(status=status):
+                errors=[urllib.error.HTTPError('https://graph.microsoft.com',status,'temporary',{},io.BytesIO(b'{}')) for _ in range(4)]
+                client,opener=self.build_client(errors)
+                with self.assertRaises(GraphError):client.get('/users/test')
+                self.assertEqual(opener.open.call_count,4)
+                self.assertEqual([call.args[0] for call in client._sleep.call_args_list],[1,2,4])
+
     def test_credentials_only_sent_to_official_token_endpoint_and_kept_in_memory(self):
         client, opener = self.build_client([{"access_token": "synthetic-token", "expires_in": 3600}])
         client._token = None

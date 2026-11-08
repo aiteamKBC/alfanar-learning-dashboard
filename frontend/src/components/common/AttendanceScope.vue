@@ -11,6 +11,9 @@ defineProps<{ module: ModuleProgress }>()
       <template v-if="module.delivered_lectures.source === 'owner_confirmed'">
         {{ module.delivered_lectures.count }} owner-confirmed delivered lectures ·
       </template>
+      <template v-else-if="module.delivered_lectures.source === 'owner_confirmed_plus_verified'">
+        {{ module.delivered_lectures.count }} delivered lectures ·
+      </template>
       {{ module.delivered_sessions ?? 'Not Available' }} sessions with attendance evidence.
     </p>
     <p class="text-ink-2">

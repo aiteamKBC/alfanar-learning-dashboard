@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Alfanar Teams lecture discovery at 23:00 Africa/Cairo
+
+[Timer]
+OnCalendar=*-*-* 23:00:00 Africa/Cairo
+Persistent=true
+AccuracySec=1s
+Unit=alfanar-teams-discovery.service
+
+[Install]
+WantedBy=timers.target

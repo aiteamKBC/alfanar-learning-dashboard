@@ -46,10 +46,16 @@ CONFIRMED_DELIVERED_LECTURES: dict[int, dict] = {
 }
 
 
-def delivered_lectures(course_sid: int, teams_sessions: int | None, evidence_source="teams") -> dict:
+def delivered_lectures(course_sid: int, teams_sessions: int | None, evidence_source="teams", new_occurrences=0) -> dict:
     """Displayed delivered-lecture count with its provenance; the Teams count is kept alongside."""
     c = CONFIRMED_DELIVERED_LECTURES.get(course_sid)
     if c:
+        if new_occurrences:
+            return {"count": c["count"] + new_occurrences, "source": "owner_confirmed_plus_verified",
+                    "historical_count": c["count"], "new_occurrences": new_occurrences,
+                    "teams_sessions": teams_sessions, "confirmed_by": c["confirmed_by"], "confirmed_on": c["confirmed_on"],
+                    "note": f"{c['count']} owner-confirmed historical lectures plus {new_occurrences} verified new lectures.",
+                    "differs_from_teams": teams_sessions != c["count"] + new_occurrences}
         return {"count": c["count"], "source": "owner_confirmed", "teams_sessions": teams_sessions,
                 "confirmed_by": c["confirmed_by"], "confirmed_on": c["confirmed_on"], "note": c["note"],
                 "differs_from_teams": teams_sessions is not None and teams_sessions != c["count"]}

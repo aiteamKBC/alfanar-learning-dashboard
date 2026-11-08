@@ -2,6 +2,7 @@
 import datetime as dt
 import hashlib
 import json
+import os
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -15,7 +16,7 @@ from analytics import metrics
 from analytics.importer.exclusions import NON_LEARNER_SOURCE_IDS
 from analytics.importer.identities import MERGED_LEARNER_IDS
 from analytics.importer.service import fetch_source
-from analytics.models import AcademicEvidence, Enrollment, Learner, LearnerIdentity, LessonRecord, LectureTiming, QuizAttempt, SessionAttendance, Submission
+from analytics.models import AcademicEvidence, Enrollment, Learner, LearnerIdentity, LessonRecord, LectureTiming, QuizAttempt, SessionAttendance, Submission, TeamsOccurrence
 
 
 class Command(BaseCommand):
@@ -24,6 +25,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('--source', choices=['google','excel'], default='google')
         parser.add_argument('--snapshot', help='Previously captured read-only LMS JSON snapshot, for reproducibility')
+        parser.add_argument('--discovery-config', default=os.environ.get('TEAMS_DISCOVERY_CONFIG'), help='Private identity policy for independently auditing new Graph occurrences')
         parser.add_argument('--output', default=str(settings.PROJECT_ROOT/'data'/'reconciliation.json'))
 
     def handle(self, *args, **options):
@@ -254,17 +256,57 @@ class Command(BaseCommand):
             micros=(duration.days*86400+duration.seconds)*1_000_000+duration.microseconds
             check(f'attendance.timing_union.{uid}.{cid}.{day}',timing.duration_microseconds,micros)
             if micros>=threshold:effective_cells[(uid,cid,day)]=1
+        # New occurrences use stable occurrence keys, never date-only grouping.
+        # Recompute interval unions from the retained raw Graph report revisions.
+        new_counts=Counter()
+        occurrences=list(TeamsOccurrence.objects.filter(status='verified').select_related('series'))
+        if occurrences and not options['discovery_config']:
+            raise CommandError('A private discovery config is required to audit new occurrence identities')
+        policy=json.loads(Path(options['discovery_config']).read_text(encoding='utf-8')) if occurrences else {}
+        aliases={str(r['email']).strip().lower():r for r in policy.get('aliases',[])}
+        for occurrence in occurrences:
+            cid=occurrence.course_source_id;new_counts[cid]+=1
+            sweeps=defaultdict(Counter)
+            for evidence in occurrence.series.reports.filter(complete=True):
+                raw=evidence.payload['report']
+                a=dt.datetime.fromisoformat(raw['meetingStartDateTime'].replace('Z','+00:00'))
+                b=dt.datetime.fromisoformat(raw['meetingEndDateTime'].replace('Z','+00:00'))
+                if not (a<occurrence.scheduled_end and b>occurrence.scheduled_start):continue
+                for record in evidence.payload['records']:
+                    email=str(record.get('emailAddress') or '').strip().lower();u=email_ids.get(email)
+                    if email in aliases:
+                        alias=aliases[email];identity=record.get('identity') or {}
+                        u=alias['learner_source_id'] if (identity.get('id'),identity.get('tenantId'))==(alias['identity_id'],alias['tenant_id']) else None
+                    if (u,cid) not in ens:continue
+                    for interval in record['attendanceIntervals']:
+                        a=dt.datetime.fromisoformat(interval['joinDateTime'].replace('Z','+00:00'))
+                        b=dt.datetime.fromisoformat(interval['leaveDateTime'].replace('Z','+00:00'))
+                        sweeps[u][a]+=1;sweeps[u][b]-=1
+            actual={r.learner_source_id:r for r in occurrence.attendance.all()}
+            for u,events in sweeps.items():
+                depth=0;previous=None;duration=dt.timedelta()
+                for stamp,delta in sorted(events.items()):
+                    if depth and previous is not None:duration+=stamp-previous
+                    depth+=delta;previous=stamp
+                micros=(duration.days*86400+duration.seconds)*1_000_000+duration.microseconds
+                if u in actual:
+                    check(f'graph.occurrence.{occurrence.pk}.{u}.raw_union',actual[u].duration_microseconds,micros)
+                else:check(f'graph.occurrence.{occurrence.pk}.{u}.missing_record',True,False)
+                if micros>=threshold:effective_cells[(u,cid,f'auto:{occurrence.pk}')]=1
+            check(f'graph.occurrence.{occurrence.pk}.participant_set',set(actual),set(sweeps))
         chart=metrics.charts()
         modules=[]
         for row in chart['module_progress']:
             cid=row['course_id']; pairs={p for p in ens if p[1]==cid}
             known={(u,c,d):v for (u,c,d),v in effective_cells.items() if (u,c) in pairs}
-            possible=len(pairs)*len(dates[cid])
+            session_count=len(dates[cid])+new_counts[cid]
+            possible=len(pairs)*session_count
             n=sum(known.values());den=len(known)
             check(f'module.{cid}.enrollments',row['enrollments'],len(pairs))
             check(f'module.{cid}.active',row['active'],len(pairs & active_pairs))
             check(f'module.{cid}.progress',row['mean_progress'],avg([progress[p] for p in pairs if progress[p] is not None]))
-            check(f'module.{cid}.sessions',row['delivered_sessions'],len(dates[cid]))
+            check(f'module.{cid}.sessions',row['delivered_sessions'],session_count)
+            check(f'module.{cid}.delivered_lectures',row['delivered_lectures']['count'],{83334:16,121642:14,135945:16,154268:12}[cid]+new_counts[cid])
             check(f'module.{cid}.lecture_recordings',row['lecture_recordings'],len(catalog[cid]['video']))
             qrow=next(q for q in chart['quiz_by_module'] if q['course_id']==cid)
             qr={key:r for key,r in latest.items() if key[1]==cid}
@@ -286,7 +328,7 @@ class Command(BaseCommand):
                 check(f'module.{cid}.attendance.{field}',row['attendance'][field],v)
             modules.append({'course_id':cid,'title':row['course'],'enrollments':len(pairs),'active_in_lms':len(pairs & active_pairs),
                             'mean_progress':row['mean_progress'],'delivered_lectures':row['delivered_lectures']['count'],
-                            'dated_attendance_sessions':len(dates[cid]),'attendance_numerator':n,'attendance_denominator':den,
+                            'dated_attendance_sessions':session_count,'attendance_numerator':n,'attendance_denominator':den,
                             'attendance_pct':pct(n,den),'possible_learner_sessions':possible,'evidence_coverage_pct':pct(den,possible),
                             'measured_enrollments':len({(u,c) for u,c,d in known}),
                             'missing_learner_sessions':possible-den,'dates':[str(d) for d in dates[cid]]})

@@ -248,7 +248,8 @@ def charts(course_id=None, engagement=None, activity_type=None) -> dict:
             # Module-level facts (independent of learner filters):
             "delivered_sessions": (teams_n := len(index.sessions_by_course[c.source_id]) if index.has_data(c.source_id) else None),
             "delivered_lectures": confirmed.delivered_lectures(c.source_id, teams_n,
-                "attendance_matrix" if any(s["meeting__evidence_source"] == "attendance_matrix" for s in index.sessions_by_course[c.source_id]) else "teams"),
+                "attendance_matrix" if any(s["meeting__evidence_source"] == "attendance_matrix" for s in index.sessions_by_course[c.source_id]) else "teams",
+                new_occurrences=index.new_occurrences[c.source_id]),
             "lecture_recordings": recordings.get(cid, 0),
             "attendance": att.aggregate(index, [(e.learner.source_id, c.source_id) for e in ens]),
         })
@@ -528,7 +529,7 @@ def module_matrix(enrollment: Enrollment) -> dict:
     learner_sid, course_sid = enrollment.learner.source_id, enrollment.course.source_id
     summary_att = index.enrollment(learner_sid, course_sid)
     from .attendance.timing import attach_timing
-    matrix_calendar = any(s["meeting__evidence_source"] == "attendance_matrix"
+    matrix_calendar = any(s["meeting__evidence_source"] in ("attendance_matrix", "graph_occurrence")
                           for s in index.sessions_by_course.get(course_sid, []))
     sessions = index.sessions_for(learner_sid, course_sid) if summary_att["available"] or matrix_calendar else []
     sessions = attach_timing(sessions, learner_sid, course_sid)

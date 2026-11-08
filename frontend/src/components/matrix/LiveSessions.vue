@@ -17,18 +17,24 @@ const counts = computed(() => {
     brief: s.filter((x) => x.status === 'brief').length,
     none: s.filter((x) => x.status === 'not_recorded' || x.status === 'unavailable').length,
     absent: s.filter((x) => x.status === 'absent').length,
+    review: s.filter((x) => x.status === 'review').length,
     timed: s.filter((x) => x.timing.available).length,
   }
 })
 const STATUS = {
+  review: { label: 'Review', cls: 'bg-white text-ink-3 ring-gray-200', icon: '–' },
   absent: { label: 'Recorded absent', cls: 'bg-white text-ink-3 ring-gray-200', icon: '–' },
   unavailable: { label: 'Not Available', cls: 'bg-amber-50 text-amber-800 ring-amber-200', icon: '–' },
   attended: { label: 'Attended', cls: 'bg-emerald-50 text-emerald-800 ring-emerald-200', icon: '✓' },
   brief: { label: 'Brief join', cls: 'bg-amber-50 text-amber-800 ring-amber-200', icon: '◔' },
   not_recorded: { label: 'Not recorded', cls: 'bg-white text-ink-3 ring-gray-200', icon: '–' },
 } as const
-function timeOnly(v: string | null) {
-  return v ? new Date(v).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'UTC' }) : 'Not Available'
+function timeOnly(v: string | null, lectureDate?: string) {
+  if (!v) return 'Not Available'
+  const instant = new Date(v)
+  const clock = instant.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'UTC' })
+  return lectureDate && instant.toISOString().slice(0, 10) !== lectureDate
+    ? `${instant.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' })} ${clock}` : clock
 }
 function timingDuration(seconds: number | null) {
   if (seconds === null) return 'Not Available'
@@ -79,7 +85,7 @@ function timingDuration(seconds: number | null) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="s in attendance.sessions" :key="s.number" :data-session-date="s.date" class="hover:bg-navy-soft/30">
+          <tr v-for="s in attendance.sessions" :key="s.occurrence_key ?? s.number" :data-session-date="s.date" class="hover:bg-navy-soft/30">
             <td class="border-b border-line px-4 py-2 font-medium text-ink tabular">Session {{ s.number }}</td>
             <td class="border-b border-line px-3 py-2 text-ink-2 tabular">{{ dateTime(s.date, false) }}</td>
             <td class="border-b border-line px-3 py-2">
@@ -96,8 +102,8 @@ function timingDuration(seconds: number | null) {
                 <span>Below {{ s.reconciliation.minimum_minutes }} min</span>
               </div>
             </td>
-            <td data-first-join class="border-b border-line px-3 py-2 text-ink-2 tabular">{{ timeOnly(s.timing.first_join) }}</td>
-            <td data-last-leave class="border-b border-line px-3 py-2 text-ink-2 tabular">{{ timeOnly(s.timing.last_leave) }}</td>
+            <td data-first-join class="border-b border-line px-3 py-2 text-ink-2 tabular">{{ timeOnly(s.timing.first_join, s.date) }}</td>
+            <td data-last-leave class="border-b border-line px-3 py-2 text-ink-2 tabular">{{ timeOnly(s.timing.last_leave, s.date) }}</td>
             <td data-attended-duration class="border-b border-line px-3 py-2 tabular" :class="s.timing.available ? 'text-ink' : 'text-ink-3'">
               {{ timingDuration(s.timing.duration_seconds) }}
               <span v-if="(s.timing.visits ?? 0) > 1" class="ml-1 text-[11px] text-ink-3">({{ s.timing.visits }} visits)</span>
@@ -109,7 +115,7 @@ function timingDuration(seconds: number | null) {
           <tr class="text-ink">
             <td class="border-t-2 border-line-strong px-4 py-2.5 font-semibold">{{ attendance.delivered }} sessions with evidence</td>
             <td class="border-t-2 border-line-strong px-3 py-2.5" />
-            <td class="border-t-2 border-line-strong px-3 py-2.5 tabular"><b>{{ counts.attended }}</b> attended · {{ counts.absent }} absent · {{ counts.brief }} brief · {{ counts.none }} Not Available</td>
+            <td class="border-t-2 border-line-strong px-3 py-2.5 tabular"><b>{{ counts.attended }}</b> attended · {{ counts.absent }} absent · {{ counts.brief }} brief · {{ counts.none }} Not Available<span v-if="counts.review"> · {{ counts.review }} Review</span></td>
             <td class="border-t-2 border-line-strong px-3 py-2.5" />
             <td class="border-t-2 border-line-strong px-3 py-2.5" />
             <td class="border-t-2 border-line-strong px-3 py-2.5" />

@@ -282,6 +282,8 @@ def attach_timing(sessions, learner_sid, course_sid):
             import_run__active=True, status=LectureTiming.Status.VERIFIED,
             learner_source_id=learner_sid, course_source_id=course_sid)}
     for session in sessions:
+        if session.get('occurrence_key'):
+            continue  # occurrence-scoped timing must never be replaced by a date-scoped historical row
         record = records.get(session["date"])
         if (course_sid, session["date"]) in AMBIGUOUS_DATES:
             record = None

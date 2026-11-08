@@ -1,0 +1,24 @@
+# Install only after explicit production deployment approval. Separate from LMS sync.
+[Unit]
+Description=Alfanar verified Teams lecture discovery (all four modules)
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=2h
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+User=root
+Group=www-data
+WorkingDirectory=/var/www/alfanar-learning-dashboard/backend
+EnvironmentFile=/var/www/alfanar-learning-dashboard/backend/.env
+Environment=TEAMS_SYNC_LOCK_FILE=/var/lib/alfanar-teams/sync.lock
+StateDirectory=alfanar-teams
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/var/www/alfanar-learning-dashboard/backend/venv/bin/python manage.py sync_teams_lectures
+TimeoutStartSec=45min
+Restart=on-failure
+RestartSec=15min
+NoNewPrivileges=true
+PrivateTmp=true
