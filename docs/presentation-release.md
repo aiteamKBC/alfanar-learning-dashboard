@@ -33,6 +33,65 @@ Production. Preserve existing private evidence and publisher destination state.
 The exposed Google service-account key must be rotated and its replacement verified
 before production rollout. Do not put the replacement in Git or in this release package.
 
+## Resume the reviewed restoration from 40d982d
+
+Use this section when migration 0007 and the frontend build are already complete and
+the existing private dry run has been reviewed: 37 learners, 113 enrollments, 1,004
+verified timing pairs and 76 held review pairs. Skip sections 1-4 below in this case.
+
+The authorization fix uses the existing active `owner_review` account directly for
+login, identity actions and restoration audit attribution. No DashboardAccess/Owner
+Grant, password reset, account creation or staff/superuser flag is required. All other
+accounts are refused by the identity APIs, including staff and superusers. Migration
+0007 is unchanged; there are no new migrations, dependencies or frontend source changes.
+
+Use the exact fix commit from the delivery report. Keep `backup` set to the directory
+of the **existing verified database backup**; do not guess the newest directory or
+replace the backup. Work in the same maintenance window with no running sync job;
+do not restart or reconfigure the Teams scheduler.
+
+```bash
+set -euo pipefail
+umask 077
+app=/var/www/alfanar-learning-dashboard
+release=/var/lib/alfanar-identity-release-20261109
+python="$app/backend/venv/bin/python"
+env_file="$app/backend/.env"
+db="$app/backend/db.sqlite3"
+service=alfanar-gunicorn.service
+commit=FIX_COMMIT_FROM_DELIVERY_REPORT
+: "${backup:?Set backup to the existing verified backup directory}"
+test -f "$backup/db.sqlite3"
+test -f "$release/dry-run-private.json"
+cd "$app"
+test -z "$(git status --porcelain)"
+git fetch origin main
+git merge-base --is-ancestor "$commit" origin/main
+systemctl stop "$service"
+git switch --detach "$commit"
+"$python" "$release/release_manage.py" --app "$app" --env-file "$env_file" manage apply_reviewed_identity_restoration \
+  --release-dir "$release" --backup "$backup/db.sqlite3"
+"$python" "$release/release_manage.py" --app "$app" --env-file "$env_file" verify
+systemctl start "$service"
+systemctl is-active "$service"
+```
+
+The new Git-delivered management helper works through the existing private
+`release_manage.py`; no replacement private package or SCP transfer is needed. It
+validates `dry-run-private.json`, uses its original plan hash and existing evidence,
+and writes `applied-private.json`. It does not fetch LMS data or generate a new plan.
+The underlying restoration still checks the backup, source hashes, identity revision
+and recomputed plan inside its transaction; changed evidence fails safely. Do not edit
+the reviewed plan to bypass a mismatch. On failure, keep the service stopped and use
+section 5 if rollback is needed. No Google write or Teams synchronization is invoked.
+
+Log in with the existing `owner_review` password and verify 37 learners / 113 enrollments
+and the identity controls. Existing login sessions also receive the new capability on
+refresh. Do not apply a real merge merely to test access.
+
+The remaining sections document a first-time restoration and rollback; do not repeat
+the source capture, migration, build or dry run for the resume procedure above.
+
 ## 1. Transfer and verify the private package
 
 The delivery report supplies the commit hash and exact local paths. In PowerShell:
@@ -136,20 +195,12 @@ from this release baseline, stop for reconciliation and a new reviewed plan.
 
 ## 4. Apply the reviewed restoration
 
-Enter the username of the existing authorized dashboard owner. This grants identity
-management only, without changing that account's password or staff status.
+The existing active `owner_review` account is the restoration actor. No separate
+grant, new account, password change or staff status is required.
 
 ```bash
-read -r -p 'Existing dashboard owner username: ' owner
-plan=$("$python" -c 'import json,sys; print(json.load(open(sys.argv[1]))["plan_sha256"])' "$release/dry-run-private.json")
-"$python" "$release/release_manage.py" --app "$app" --env-file "$env_file" manage restore_original_identities \
-  --lms-json "$release/current-lms.json" \
-  --timing-source "$release/teams-timing.xlsx" \
-  --timing-policy "$release/timing-policy.json" \
-  --graph-cache "$release/graph-cache.json" \
-  --matrices "$release/attendance" \
-  --report "$release/applied-private.json" \
-  --apply --expected-plan "$plan" --backup "$backup/db.sqlite3" --owner "$owner"
+"$python" "$release/release_manage.py" --app "$app" --env-file "$env_file" manage apply_reviewed_identity_restoration \
+  --release-dir "$release" --backup "$backup/db.sqlite3"
 "$python" "$release/release_manage.py" --app "$app" --env-file "$env_file" verify
 "$python" "$release/release_manage.py" --app "$app" --env-file "$env_file" manage check
 systemctl start "$service"

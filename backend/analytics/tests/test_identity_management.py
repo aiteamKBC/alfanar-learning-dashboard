@@ -28,8 +28,7 @@ from analytics.attendance.master_snapshot import HEADERS, ExportError
 class IdentityLifecycleTests(TestCase):
     def setUp(self):
         self.tables = build_tables()
-        self.owner = get_user_model().objects.create_user(username='synthetic-owner')
-        DashboardAccess.objects.create(user=self.owner, can_manage_identities=True)
+        self.owner = get_user_model().objects.create_user(username='owner_review')
         self.sync()
 
     def sync(self):
@@ -132,7 +131,13 @@ class IdentityLifecycleTests(TestCase):
     def test_permission_boundaries_and_csrf(self):
         viewer = get_user_model().objects.create_user(username='synthetic-viewer')
         DashboardAccess.objects.create(user=viewer)
-        for user in (None, viewer):
+        staff = get_user_model().objects.create_user(username='synthetic-staff', is_staff=True)
+        admin = get_user_model().objects.create_user(username='synthetic-admin', is_superuser=True)
+        granted = get_user_model().objects.create_user(username='synthetic-granted')
+        case_variant = get_user_model().objects.create_user(username='OWNER_REVIEW')
+        for user in (staff, granted, case_variant):
+            DashboardAccess.objects.create(user=user, can_manage_identities=True)
+        for user in (None, viewer, staff, admin, granted, case_variant):
             c=Client()
             if user: c.force_login(user)
             for url in ('identities','identities/preview','identities/confirm'):
@@ -146,6 +151,40 @@ class IdentityLifecycleTests(TestCase):
         result=c.post('/api/identities/confirm',{'token':p.json()['token']},content_type='application/json',HTTP_X_CSRFTOKEN=token)
         self.assertEqual(result.status_code,200)
         self.assertEqual(c.get('/api/auth/session').json()['user']['can_manage_identities'],True)
+        self.assertFalse(DashboardAccess.objects.filter(user=self.owner).exists())
+
+    def test_owner_without_grant_can_complete_all_identity_actions_through_api(self):
+        c = Client(enforce_csrf_checks=True)
+        c.force_login(self.owner)
+        self.assertEqual(c.get('/api/identities').status_code, 200)
+        c.get('/api/auth/session')
+        token = c.cookies['csrftoken'].value
+        for kind, ids, primary, count in (
+            ('merge', [101, 102], 101, 2), ('unmerge', [101], None, 3),
+            ('archive', [101], None, 2), ('restore', [101], None, 3),
+        ):
+            with self.subTest(kind=kind):
+                preview = c.post('/api/identities/preview',
+                    {'kind': kind, 'learner_ids': ids, 'primary_id': primary},
+                    content_type='application/json', HTTP_X_CSRFTOKEN=token)
+                self.assertEqual(preview.status_code, 200)
+                self.assertEqual(c.post('/api/identities/confirm', {'token': preview.json()['token']},
+                    content_type='application/json').status_code, 403)
+                confirmed = c.post('/api/identities/confirm', {'token': preview.json()['token']},
+                    content_type='application/json', HTTP_X_CSRFTOKEN=token)
+                self.assertEqual(confirmed.status_code, 200)
+                self.assertEqual(Learner.objects.count(), count)
+        self.assertEqual(IdentityOperation.objects.filter(actor=self.owner, applied_at__isnull=False).count(), 4)
+        self.assertFalse(DashboardAccess.objects.filter(user=self.owner).exists())
+
+    def test_inactive_owner_cannot_use_identity_apis(self):
+        self.client.force_login(self.owner)
+        self.owner.is_active = False
+        self.owner.save(update_fields=['is_active'])
+        for url in ('identities', 'identities/preview', 'identities/confirm'):
+            response = (self.client.get('/api/' + url) if url == 'identities' else
+                self.client.post('/api/' + url, {}, content_type='application/json'))
+            self.assertIn(response.status_code, (401, 403))
 
     def test_different_owner_cannot_confirm_preview(self):
         other=get_user_model().objects.create_user(username='other-owner')

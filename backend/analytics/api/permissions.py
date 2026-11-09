@@ -2,11 +2,19 @@ from rest_framework.permissions import BasePermission
 
 from ..models import DashboardAccess
 
+IDENTITY_OWNER_USERNAME = 'owner_review'
+
+
+def can_manage_identities(user) -> bool:
+    """Only the project's existing active owner account; no separate grant."""
+    return bool(user and user.is_authenticated and user.is_active
+                and user.get_username() == IDENTITY_OWNER_USERNAME)
+
 
 def has_dashboard_access(user) -> bool:
     if not (user and user.is_authenticated and user.is_active):
         return False
-    if user.is_superuser:
+    if can_manage_identities(user) or user.is_superuser:
         return True
     try:
         return user.dashboard_access.is_valid()
@@ -15,7 +23,7 @@ def has_dashboard_access(user) -> bool:
 
 
 class HasDashboardAccess(BasePermission):
-    """Authenticated, active, and holding a valid (unexpired, unrevoked) dashboard grant."""
+    """Active project owner, or an existing valid dashboard access policy."""
 
     message = "Your account does not have dashboard access."
 
@@ -23,13 +31,8 @@ class HasDashboardAccess(BasePermission):
         return has_dashboard_access(request.user)
 
 
-def can_manage_identities(user):
-    return has_dashboard_access(user) and (user.is_superuser or user.is_staff or
-        bool(getattr(getattr(user, 'dashboard_access', None), 'can_manage_identities', False)))
-
-
 class CanManageIdentities(BasePermission):
-    message = 'Only the dashboard owner or authorized staff can manage identities.'
+    message = 'Only the active owner_review account can manage identities.'
 
     def has_permission(self, request, view):
         return can_manage_identities(request.user)

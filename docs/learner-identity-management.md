@@ -7,18 +7,27 @@ to imports. Configured non-learner exclusions still apply.
 ## Owner workflow
 
 Executive Overview → Learner-by-module progress includes selection, Select All, Clear
-Selection, Merge and Delete for authorized owners/staff. Selection uses stable source
+Selection, Merge and Delete for the active `owner_review` account. Selection uses stable source
 IDs and survives module filtering. Merge previews list originals and modules, allow
 the primary identity to be chosen, and show affected evidence and resulting counts.
 Nothing changes until confirmation. Delete archives; Manage identities provides
 Restore, Unmerge and history. Undoing a nested merge restores its direct parent groups;
 those groups can then be unmerged separately.
 
-Viewers have no controls and receive 403 from identity APIs. An active dashboard grant
-plus staff status or `DashboardAccess.can_manage_identities` is required; superusers
-are permitted. The existing explicit `provision_owner` command grants this capability.
-The restoration command can grant it to an existing authorized owner with `--owner`.
-It never changes passwords or grants staff/superuser privileges.
+Only the authenticated, active account with the exact username `owner_review` can
+manage identities. It can log in and use the existing dashboard without a separate
+DashboardAccess/Owner Grant. Legacy grant expiry or revocation does not apply to this
+account; deactivate the user itself to revoke access. All other accounts, including
+staff, superusers and accounts with legacy management grants, are denied identity APIs
+and receive no management controls. Anonymous and inactive users are also denied.
+
+Migration 0007 and its legacy grant field remain unchanged for schema compatibility;
+the field no longer authorizes identity actions. No provisioning command is needed.
+The restoration command requires the existing active `owner_review` account and records
+it as the audit actor. Optional `--owner` accepts only `owner_review`. No account, grant,
+password or staff/superuser status is changed. `apply_reviewed_identity_restoration`
+uses an existing private dry-run plan and backup, retaining the original plan hash and
+all source-validation, transaction and rollback safeguards.
 
 ## Persistence and rules
 

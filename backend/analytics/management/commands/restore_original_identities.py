@@ -5,13 +5,15 @@ import sqlite3
 from collections import Counter
 from pathlib import Path
 
+from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
 from django.utils import timezone
 
 from analytics.models import (IdentityState, IdentityEvidenceArchive, IdentityOperation,
-    SessionAttendance, LectureTiming, TimingImport, Learner, Enrollment, DashboardAccess, LearnerIdentity, TeamsOccurrenceAttendance)
+    SessionAttendance, LectureTiming, TimingImport, Learner, Enrollment, LearnerIdentity, TeamsOccurrenceAttendance)
+from analytics.api.permissions import IDENTITY_OWNER_USERNAME
 from analytics.identity import capture_source, rebuild, lock_revision
 from analytics.importer.identities import LEGACY_MANUAL_MERGES
 from analytics.attendance.timing import prepare_tables, activate_snapshot, digest
@@ -32,7 +34,8 @@ class Command(BaseCommand):
         parser.add_argument('--apply', action='store_true')
         parser.add_argument('--expected-plan')
         parser.add_argument('--backup')
-        parser.add_argument('--owner')
+        parser.add_argument('--owner', default=IDENTITY_OWNER_USERNAME,
+                            help='Existing active owner_review account used for audit attribution; no grant required.')
 
     def handle(self, *args, **o):
         try:
@@ -42,6 +45,11 @@ class Command(BaseCommand):
             raise CommandError(f'Restoration failed ({type(exc).__name__}); transaction rolled back. Inspect private validation inputs.') from exc
 
     def restore(self, o):
+        if o['owner'] != IDENTITY_OWNER_USERNAME:
+            raise CommandError('Identity restoration requires the existing owner_review account.')
+        owner = get_user_model().objects.filter(username=IDENTITY_OWNER_USERNAME, is_active=True).first()
+        if owner is None:
+            raise CommandError('The existing owner_review account must be active; no account or grant was changed.')
         if o['apply']:
             path = Path(o['backup'] or '')
             if not path.is_file() or not o['expected_plan']:
@@ -117,13 +125,7 @@ class Command(BaseCommand):
             plan_sha = digest(plan)
             if o['apply'] and plan_sha != o['expected_plan']:
                 raise CommandError('Dry-run plan changed; apply refused. Review a new dry run.')
-            if o['owner']:
-                grant = DashboardAccess.objects.filter(user__username=o['owner'], user__is_active=True).first()
-                if not grant or not grant.is_valid():
-                    raise CommandError('Selected owner has no valid dashboard grant.')
-                grant.can_manage_identities = True
-                grant.save(update_fields=['can_manage_identities'])
-            IdentityOperation.objects.create(kind='restore_originals', revision=s.revision-1, snapshot_sha256=snapshot.sha256,
+            IdentityOperation.objects.create(actor=owner, kind='restore_originals', revision=s.revision-1, snapshot_sha256=snapshot.sha256,
                 request={'legacy_mappings': LEGACY_MANUAL_MERGES}, preview=serial(before), result=serial(after), applied_at=timezone.now())
             output = {**plan, 'plan_sha256': plan_sha, 'applied': o['apply'], 'identity_review': held}
             Path(o['report']).write_text(json.dumps(output, cls=DjangoJSONEncoder, indent=2), encoding='utf-8')

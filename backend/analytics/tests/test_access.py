@@ -24,6 +24,45 @@ class DashboardUserTests(TestCase):
         return self.client.post("/api/auth/login", {"username": username, "password": PW},
                                 content_type="application/json")
 
+    def test_active_owner_login_and_session_need_no_grant_or_password_change(self):
+        owner = User.objects.create_user('owner_review', password=PW)
+        original_password = owner.password
+        self.assertEqual(self.login('owner_review').status_code, 200)
+        session = self.client.get('/api/auth/session').json()
+        self.assertTrue(session['authenticated'])
+        self.assertTrue(session['user']['can_manage_identities'])
+        self.assertFalse(session['user']['temporary'])
+        self.assertIsNone(session['user']['expires_at'])
+        self.assertEqual(self.client.get('/api/learners').status_code, 200)
+        self.assertEqual(self.client.get('/api/identities').status_code, 200)
+        owner.refresh_from_db()
+        self.assertEqual(owner.password, original_password)
+        self.assertFalse(owner.is_staff or owner.is_superuser)
+        self.assertFalse(DashboardAccess.objects.exists())
+        self.assertEqual(User.objects.count(), 1)
+
+    def test_owner_ignores_obsolete_expired_or_disabled_grant(self):
+        owner = User.objects.create_user('owner_review', password=PW)
+        grant = DashboardAccess.objects.create(user=owner, revoked_at=timezone.now(), is_temporary=True,
+            expires_at=timezone.now() - dt.timedelta(days=1), can_manage_identities=False)
+        self.assertEqual(self.login('owner_review').status_code, 200)
+        session = self.client.get('/api/auth/session').json()
+        self.assertTrue(session['user']['can_manage_identities'])
+        self.assertFalse(session['user']['temporary'])
+        self.assertIsNone(session['user']['expires_at'])
+        self.assertEqual(self.client.get('/api/identities').status_code, 200)
+        grant.refresh_from_db()
+        self.assertIsNotNone(grant.revoked_at)
+        self.assertFalse(grant.can_manage_identities)
+
+    def test_inactive_owner_cannot_login_or_keep_authenticated_session(self):
+        owner = User.objects.create_user('owner_review', password=PW)
+        self.assertEqual(self.login('owner_review').status_code, 200)
+        owner.is_active = False
+        owner.save(update_fields=['is_active'])
+        self.assertFalse(self.client.get('/api/auth/session').json()['authenticated'])
+        self.assertEqual(self.login('owner_review').status_code, 400)
+
     def test_temporary_user_is_restricted_and_can_view_dashboard(self):
         provision("add", "owner_review", "--temporary", "--days", "7")
         u = User.objects.get(username="owner_review")
