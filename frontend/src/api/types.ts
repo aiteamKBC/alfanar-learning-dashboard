@@ -37,7 +37,7 @@ export interface ModuleLearnerMetrics extends Pick<CourseProgress,
   'quizzes_attempted' | 'quizzes_known' | 'mean_latest_score' | 'lessons_by_type' | 'assignments_submitted' | 'assignments_known'> {
   verified_attendance_seconds: number | null
 }
-export interface MatrixLearnerRow { learner_id: number; name: string; progress: Record<string, number | null>; module_metrics: Record<string, ModuleLearnerMetrics> }
+export interface MatrixLearnerRow { learner_id: number; name: string; progress: Record<string, number | null>; module_metrics?: Record<string, ModuleLearnerMetrics> }
 export interface Charts {
   module_progress: ModuleProgress[]
   quiz_by_module: QuizByModule[]
@@ -254,5 +254,5 @@ export interface LiveSession {
 export interface MatrixAttendance extends EnrollmentAttendance {
   sessions: LiveSession[]
   timing_available: boolean
-  verified_attendance_seconds: number | null
+  verified_attendance_seconds?: number | null
 }

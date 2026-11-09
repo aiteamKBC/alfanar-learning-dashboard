@@ -36,6 +36,14 @@ cd frontend; npm run dev
 
 Open http://127.0.0.1:5173 and sign in with a dashboard account.
 
+Keep Django's default auto-reloader enabled during local development. A backend
+started with `--noreload` continues serving its previously loaded Python code after
+a pull or edit, even when Vite shows the new frontend. Restart that local backend
+using the command above when API fields are missing. Rebuilding the frontend alone
+does not update the running API. No data import or migration is needed for this
+runtime mismatch. Check the actual API on port 8000 and the proxied browser view,
+not only an isolated test server.
+
 ## Dashboard accounts
 
 Dashboard access requires an authenticated user with an active dashboard grant. Dashboard-only users are never staff or superusers, so they cannot use Django Admin. Passwords are entered through a hidden prompt and never passed as command-line arguments.

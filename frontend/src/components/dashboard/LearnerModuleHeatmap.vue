@@ -12,7 +12,7 @@ const selected = computed(() => props.matrix.modules.find((m) => String(m.course
 const rows = computed(() => {
   const q = search.value.trim().toLowerCase()
   const filtered = q ? props.matrix.rows.filter((r) => r.name.toLowerCase().includes(q) || String(r.learner_id).includes(q)) : props.matrix.rows
-  return filtered.map((r) => ({ ...r, metrics: selected.value ? r.module_metrics[selected.value.course_id] : undefined }))
+  return filtered.map((r) => ({ ...r, metrics: selected.value ? r.module_metrics?.[selected.value.course_id] : undefined }))
 })
 function completion(done: number | undefined, total: number | undefined) {
   return done === undefined || !total ? 'N/A' : ratio(done, total)

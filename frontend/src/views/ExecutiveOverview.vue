@@ -2,7 +2,8 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, qs } from '@/api/client'
-import type { Charts, FiltersResponse, Summary } from '@/api/types'
+import type { Charts, FiltersResponse, Matrix, Summary } from '@/api/types'
+import { withModulePerformance } from '@/api/modulePerformance'
 import { useAsync } from '@/api/useAsync'
 import FilterSelect from '@/components/common/FilterSelect.vue'
 import Icon from '@/components/common/Icon.vue'
@@ -37,7 +38,13 @@ const summary = useAsync(
   [course, engagement],
 )
 const charts = useAsync(
-  () => api.get<Charts>(`dashboard/charts${qs({ course: course.value, engagement: engagement.value, activity_type: activityType.value })}`),
+  async () => {
+    // Capture the module before awaiting; a newer filter request owns its own result.
+    const selectedCourse = course.value
+    const result = await api.get<Charts>(`dashboard/charts${qs({ course: selectedCourse, engagement: engagement.value, activity_type: activityType.value })}`)
+    return withModulePerformance(result, selectedCourse,
+      (learnerId, courseId) => api.get<Matrix>(`learners/${learnerId}/courses/${courseId}/matrix`))
+  },
   [course, engagement, activityType],
 )
 // Module snapshot always shows every module (unfiltered by module) so it can be used to drill in.

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { MatrixAttendance, ModuleProgress } from '@/api/types'
+import { verifiedAttendanceSeconds } from '@/api/modulePerformance'
 import AttendanceScope from '@/components/common/AttendanceScope.vue'
 import Icon from '@/components/common/Icon.vue'
 import InfoTip from '@/components/common/InfoTip.vue'
@@ -9,6 +10,7 @@ import { attendanceHours, dateTime, pct } from '@/utils/format'
 /** Delivered Teams sessions for one learner in one module, with a summary footer. */
 const props = defineProps<{ attendance: MatrixAttendance; definition?: string; module?: ModuleProgress }>()
 const open = ref(true)
+const totalAttendedSeconds = computed(() => verifiedAttendanceSeconds(props.attendance))
 
 const counts = computed(() => {
   const s = props.attendance.sessions
@@ -119,7 +121,7 @@ function timingDuration(seconds: number | null) {
             <td class="border-t-2 border-line-strong px-3 py-2.5" />
             <td class="border-t-2 border-line-strong px-3 py-2.5" />
             <td data-total-attended-duration class="border-t-2 border-line-strong px-3 py-2.5 font-semibold tabular whitespace-nowrap"
-              :title="timingDuration(attendance.verified_attendance_seconds)">{{ attendanceHours(attendance.verified_attendance_seconds) }}</td>
+              :title="timingDuration(totalAttendedSeconds)">{{ attendanceHours(totalAttendedSeconds) }}</td>
             <td class="border-t-2 border-line-strong px-3 py-2.5 font-semibold tabular">{{ pct(attendance.pct) }}</td>
           </tr>
         </tfoot>
