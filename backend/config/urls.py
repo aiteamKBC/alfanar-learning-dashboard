@@ -14,6 +14,7 @@ api = [
     path("dashboard/summary", views.dashboard_summary),
     path("dashboard/charts", views.dashboard_charts),
     path("learners", views.learner_list),
+    path("learners/export", views.learner_export),
     path("learners/<int:learner_id>", views.learner_detail),
     path("learners/<int:learner_id>/courses", views.learner_courses),
     path("learners/<int:learner_id>/courses/<int:course_id>/matrix", views.learner_module_matrix),

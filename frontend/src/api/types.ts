@@ -73,6 +73,10 @@ export interface Rollup {
 }
 
 export interface LearnerRow extends Rollup {
+  lessons_known: number
+  lessons_completion_pct: number | null
+  quiz_completion_pct: number | null
+  verified_attendance_seconds: number | null
   learner_id: number
   name: string
   enrollments: { course_id: number; course: string; progress_pct: number | null }[]
