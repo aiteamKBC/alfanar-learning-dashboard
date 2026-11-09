@@ -7,6 +7,7 @@ export const router = createRouter({
   routes: [
     { path: '/', name: 'overview', component: () => import('./views/ExecutiveOverview.vue'), meta: { title: 'Executive Overview', section: 'overview' } },
     { path: '/learners', name: 'learners', component: () => import('./views/LearnersView.vue'), meta: { title: 'Learners', section: 'learners' } },
+    { path: '/lectures', name: 'lectures', component: () => import('./views/LecturesView.vue'), meta: { title: 'Lectures', section: 'lectures' } },
     { path: '/learners/:id(\\d+)', name: 'learner', component: () => import('./views/LearnerDetailView.vue'), meta: { title: 'Learner profile', section: 'learners' } },
     { path: '/login', name: 'login', component: () => import('./views/LoginView.vue'), meta: { title: 'Sign in', public: true } },
     { path: '/:pathMatch(.*)*', redirect: '/' },

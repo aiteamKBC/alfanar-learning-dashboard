@@ -2,16 +2,22 @@
 
 from django.contrib.auth import authenticate, login, logout
 from django.shortcuts import get_object_or_404
+from django.http import Http404
 from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
+from django.utils.dateparse import parse_date
+from django.db.models import Max, Q
 
 from .. import metrics
 from .permissions import has_dashboard_access
 from ..models import ActivityKind, Course, Enrollment, Learner
+from ..lectures import library
+from ..lectures.media import resource_response
+from ..models import LectureResource
 
 
 class LoginThrottle(SimpleRateThrottle):
@@ -149,6 +155,67 @@ def learner_module_matrix(request, learner_id: int, course_id: int):
         learner__source_id=learner_id, course__source_id=course_id,
     )
     return Response(metrics.module_matrix(enrollment))
+
+
+# --- Lecture library ----------------------------------------------------------------------
+
+@api_view(["GET"])
+def lecture_list(request):
+    queryset = library.lecture_queryset()
+    course = _int_param(request, "course")
+    if course is not None:
+        queryset = queryset.filter(course__source_id=course)
+    for name, lookup in (("from", "session_date__gte"), ("to", "session_date__lte")):
+        value = request.query_params.get(name)
+        if value:
+            try:
+                date = parse_date(value)
+            except ValueError:
+                date = None
+            if date is None:
+                raise ValidationError({name: "Use a valid YYYY-MM-DD date."})
+            queryset = queryset.filter(**{lookup: date})
+    learners, emails, enrolled = library.registry()
+    queryset = queryset.filter(Q(course_id__in=[cid for cid, ids in enrolled.items() if ids]) | Q(course__isnull=True))
+    count = queryset.count()
+    size = min(200, max(1, _int_param(request, "page_size") or 100))
+    page = min(max(1, _int_param(request, "page") or 1), max(1, -(-count // size)))
+    return Response({
+        "count": count, "page": page, "page_size": size, "pages": max(1, -(-count // size)),
+        "cohort_count": len(learners), "timezone": "Africa/Cairo",
+        "total_recordings": LectureResource.objects.filter(lecture__in=queryset, kind="recording").count(),
+        "playable_recordings": LectureResource.objects.filter(lecture__in=queryset, kind="recording", readable=True).count(),
+        "updated_at": queryset.aggregate(last=Max("updated_at"))["last"],
+        "results": [library.lecture_summary(row, emails, enrolled) for row in queryset[(page - 1) * size:page * size]],
+    })
+
+
+@api_view(["GET"])
+def lecture_detail(request, lecture_id):
+    lecture = library.resolve_lecture(lecture_id)
+    if lecture is None:
+        raise Http404
+    if lecture.course_id is not None and not Enrollment.objects.filter(course_id=lecture.course_id).exists():
+        from rest_framework.exceptions import NotFound
+        raise NotFound()
+    return Response(library.detail(lecture))
+
+
+@api_view(["GET"])
+def lecture_resource(request, lecture_id, resource_id):
+    lecture = library.resolve_lecture(lecture_id)
+    if lecture is None:
+        raise Http404
+    asset = get_object_or_404(LectureResource.objects.select_related("lecture"),
+                              pk=resource_id, lecture_id=lecture_id)
+    if asset.lecture_id != lecture.pk:
+        asset = get_object_or_404(LectureResource, lecture=lecture, provider=asset.provider,
+                                  kind=asset.kind, source_id=asset.source_id, organizer_id=asset.organizer_id,
+                                  meeting_id=asset.meeting_id, drive_id=asset.drive_id)
+    if lecture.course_id is not None and not Enrollment.objects.filter(course_id=lecture.course_id).exists():
+        from rest_framework.exceptions import NotFound
+        raise NotFound()
+    return resource_response(request, asset)
 
 
 # --- Sync ---------------------------------------------------------------------------------
