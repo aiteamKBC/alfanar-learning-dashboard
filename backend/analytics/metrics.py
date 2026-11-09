@@ -401,6 +401,8 @@ def learner_rollup(enrollment_payloads: list[dict]) -> dict:
 
 def learner_directory(search=None, course_id=None, engagement=None, ordering="name") -> list[dict]:
     qs = Enrollment.objects.select_related("course", "learner")
+    if course_id:
+        qs = qs.filter(course__source_id=course_id)
     if search:
         q = Q(learner__name__icontains=search)
         if search.isdigit():
@@ -411,10 +413,16 @@ def learner_directory(search=None, course_id=None, engagement=None, ordering="na
     cat = catalogue()
     index = att.AttendanceIndex()
 
+    timing_records = {}
+    for source_id in {e.course.source_id for e in enrollments}:
+        timing_records.update(verified_timing_records(source_id))
     grouped = defaultdict(list)
     learners = {}
     for e in enrollments:
-        grouped[e.learner_id].append(enrollment_payload(e, stats[e.id], cat, index))
+        payload = enrollment_payload(e, stats[e.id], cat, index)
+        payload['verified_attendance_seconds'] = verified_duration_total(
+            _timed_sessions(index, e.learner.source_id, e.course.source_id, records=timing_records))
+        grouped[e.learner_id].append(payload)
         learners[e.learner_id] = e.learner
 
     rows = []
@@ -425,6 +433,13 @@ def learner_directory(search=None, course_id=None, engagement=None, ordering="na
             if not payloads:
                 continue
         roll = learner_rollup(payloads)
+        known_materials = sum(p['lessons_known'] for p in payloads)
+        durations = [p['verified_attendance_seconds'] for p in payloads
+                     if p['verified_attendance_seconds'] is not None]
+        roll.update(lessons_known=known_materials,
+            lessons_completion_pct=_pct(roll['lessons_completed'], known_materials),
+            quiz_completion_pct=_pct(roll['quizzes_attempted'], roll['quizzes_known']),
+            verified_attendance_seconds=sum(durations) if durations else None)
         if engagement == "active" and not roll["has_activity"]:
             continue
         if engagement == "inactive" and roll["has_activity"]:
@@ -447,6 +462,7 @@ def learner_directory(search=None, course_id=None, engagement=None, ordering="na
         "quizzes": lambda r: r["quizzes_attempted"],
         "modules": lambda r: r["modules"],
         "attendance": lambda r: r["attendance"]["pct"],
+        "attendance_hours": lambda r: r["verified_attendance_seconds"],
     }
     kf = sort_keys.get(key, sort_keys["name"])
     present = [r for r in rows if kf(r) is not None]

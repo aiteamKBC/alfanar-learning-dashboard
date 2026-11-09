@@ -195,8 +195,8 @@ def retain_previous_graph(rows, previous, policy):
     """Expired/truncated Graph history survives even when it never existed in Excel."""
     if not previous or previous.counts.get("primary_source") != "microsoft_graph":
         return rows, 0
-    eligible = set(Enrollment.objects.exclude(learner__source_id__in=set(NON_LEARNER_SOURCE_IDS) | set(MERGED_LEARNER_IDS))
-                   .values_list("learner__source_id", "course__source_id"))
+    from ..identity import source_enrollments
+    eligible = source_enrollments()
     calendar = set(LectureSession.objects.filter(delivered=True, meeting__evidence_source="attendance_matrix")
                    .values_list("meeting__course_source_id", "session_date"))
     verified = {(int(c), dt.date.fromisoformat(d)) for c, days in policy["verified_lecture_dates"].items() for d in days}

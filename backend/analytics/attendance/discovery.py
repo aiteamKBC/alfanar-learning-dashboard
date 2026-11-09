@@ -74,7 +74,8 @@ def registry(config):
     learners, emails, ambiguous = registry_lookup()
     included = {r[0] for r in learners} - set(NON_LEARNER_SOURCE_IDS) - set(MERGED_LEARNER_IDS)
     emails = {email: uid for email, uid in emails.items() if uid in included}
-    pairs = set(Enrollment.objects.filter(learner__source_id__in=included).values_list('learner__source_id', 'course__source_id'))
+    from ..identity import source_enrollments
+    pairs = source_enrollments()
     aliases = {}
     for a in config.get('aliases', []):
         email, uid = norm_email(a.get('email')), a.get('learner_source_id')
@@ -413,7 +414,9 @@ def reconcile_occurrences(now, cutoff, config, emails, aliases, enrolled, counts
                 for k,v in data.items(): setattr(previous,k,v)
                 previous.save(); counts['timing_pairs_updated'] += 1
                 counts['attendance_decisions_changed'] += before_present != (data['duration_microseconds'] >= 1_800_000_000)
-        qualified = occurrence.attendance.filter(duration_microseconds__gte=1_800_000_000).count()
+        from ..identity_evidence import projected_timing
+        qualified = sum(r.duration_microseconds >= 1_800_000_000 for r in
+            projected_timing(occurrence.attendance.all(), occurrence=True).values())
         if qualified >= settings.TEAMS_MIN_LEARNERS_FOR_DELIVERED:
             overlap = TeamsOccurrence.objects.filter(course_source_id=occurrence.course_source_id,
                 status='verified', starts_at__lt=end, ends_at__gt=start).exclude(pk=occurrence.pk).exists()

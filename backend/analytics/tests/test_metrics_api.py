@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 
 from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.test import TestCase
 
 from analytics.importer.service import run_sync
@@ -29,6 +30,11 @@ class ApiTestBase(TestCase):
 
 
 class SecurityTests(ApiTestBase):
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
     PROTECTED = ["/api/filters", "/api/dashboard/summary", "/api/dashboard/charts", "/api/learners",
                  "/api/learners/101", "/api/learners/101/courses", "/api/learners/101/courses/9001/matrix",
                  "/api/sync/status"]
@@ -171,5 +177,5 @@ class LearnerApiTests(ApiTestBase):
         self.assertEqual(self.client.get("/api/learners/103/courses/9001/matrix").status_code, 404)
 
     def test_query_count_bounded(self):
-        with self.assertNumQueries(12):  # +1 access check, +3 historical/new occurrence index (constant)
+        with self.assertNumQueries(13):  # Includes one bulk timing read per module, never per learner.
             self.client.get("/api/learners")

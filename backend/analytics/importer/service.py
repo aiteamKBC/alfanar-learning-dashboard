@@ -51,15 +51,13 @@ def run_sync(source_type: str, path: str | None = None, fetcher=None) -> SyncRun
         payload = fetcher() if fetcher else fetch_source(source_type, path)
         run.source_ref = payload.source_ref
         run.source_modified_at = payload.source_modified_at
-        ds = normalize(payload.tables)
+        from ..identity import sync_projection
+        with transaction.atomic():
+            ds, stats = sync_projection(payload.tables)
         run.warnings = payload.notes + ds.warnings
         run.counts = ds.counts()
         run.latest_activity_at = ds.latest_activity_at
         run.fingerprint = ds.fingerprint()
-
-        # Always reconcile (cheap, idempotent): unchanged source => zero writes.
-        with transaction.atomic():
-            stats = load_dataset(ds)
         run.changed = any(s["created"] or s["updated"] or s["deleted"] for s in stats.values())
         run.counts["load"] = stats
         run.errors = ds.errors  # non-fatal row errors

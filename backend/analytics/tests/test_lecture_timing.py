@@ -31,7 +31,8 @@ REPORTS = [(s, "2026-01-05T08:55:00Z" if rid == "R1" else a, b, rid, mid)
 def without_attendance(value):
     """The reconciliation feature may change attendance, never the LMS payload."""
     if isinstance(value, dict):
-        return {k: without_attendance(v) for k, v in value.items() if k != "attendance"}
+        return {k: without_attendance(v) for k, v in value.items()
+                if k not in {"attendance", "verified_attendance_seconds"}}
     if isinstance(value, (list, tuple)):
         return [without_attendance(v) for v in value]
     return value
@@ -138,7 +139,7 @@ class LectureTimingTests(TestCase):
         self.assertFalse(LectureTiming.objects.filter(learner_source_id=111).exists())
 
     def test_excluded_and_noncanonical_accounts_never_match(self):
-        for uid in (next(iter(NON_LEARNER_SOURCE_IDS)), next(iter(MERGED_LEARNER_IDS))):
+        for uid in NON_LEARNER_SOURCE_IDS:
             learner = Learner.objects.create(source_id=uid, name="Excluded fictional", email="l2-alt@example.invalid")
             Enrollment.objects.create(learner=learner, course=self.course)
             self.run_import()

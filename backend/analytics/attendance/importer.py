@@ -312,12 +312,16 @@ def load_dataset(ds: AttendanceDataset) -> dict:
 
 
 def registry_lookup():
-    learners = list(Learner.objects.values_list("source_id", "email", "name"))
+    from ..identity import state
+    from ..models import OriginalLearner
+    restored = bool(state() and state().restored)
+    learners = list((OriginalLearner if restored else Learner).objects.values_list("source_id", "email", "name"))
     by_email, dup_emails = {}, set()
     identities = [(sid, email) for sid, email, _ in learners]
-    canonical_ids = {sid for sid, _, _ in learners}
-    identities += list(LearnerIdentity.objects.filter(canonical_source_id__in=canonical_ids)
-                       .values_list("canonical_source_id", "email"))
+    if not restored:
+        canonical_ids = {sid for sid, _, _ in learners}
+        identities += list(LearnerIdentity.objects.filter(canonical_source_id__in=canonical_ids)
+                           .values_list("canonical_source_id", "email"))
     for sid, email in identities:
         e = norm_email(email)
         if e:
@@ -342,7 +346,8 @@ def run_attendance_import(path=None) -> AttendanceImportRun:
         if alias_problems:
             raise AttendanceValidationError(alias_problems)
         courses = dict(Course.objects.values_list("source_id", "title"))
-        enrollments = set(Enrollment.objects.values_list("learner__source_id", "course__source_id"))
+        from ..identity import source_enrollments
+        enrollments = source_enrollments()
         if path.is_dir():
             from .matrices import read_matrices, SOURCES
             ds = read_matrices(path, by_email, aliases, courses, enrollments)

@@ -133,6 +133,11 @@ def matrix_evidence(directory):
 def build_snapshot(*, strict=True, matrix_directory=None):
     """One consistent DB read transaction. No HTTP and no model writes."""
     require(minimum_minutes() == 30, 'Export requires the approved 30-minute policy')
+    from ..identity import state as identity_state, policy as identity_policy, projection
+    from ..identity_evidence import projected_timing, projected_matrix
+    from ..models import IdentityOperation, IdentityEvidenceArchive, OriginalLearner
+    identity = identity_state()
+    restored = bool(identity and identity.restored)
     index = AttendanceIndex()
     learners = list(Learner.objects.order_by('source_id').values('source_id', 'name', 'email'))
     identities = list(LearnerIdentity.objects.order_by('source_id').values('source_id', 'canonical_source_id', 'email', 'name'))
@@ -149,7 +154,8 @@ def build_snapshot(*, strict=True, matrix_directory=None):
     require(all(s.meeting.evidence_source == 'attendance_matrix' for s in historical), 'Export requires verified matrix history')
     require(len({(s.meeting.course_source_id, s.session_date) for s in historical}) == len(historical), 'Duplicate historical lecture date')
     observed = {(r.learner_source_id, r.session_id): r for r in SessionAttendance.objects.filter(session__in=historical)}
-    timings = {(r.learner_source_id, r.course_source_id, str(r.session_date)): r for r in LectureTiming.objects.filter(import_run=run).order_by('course_source_id', 'session_date', 'learner_source_id')}
+    raw_timings = list(LectureTiming.objects.filter(import_run=run).order_by('course_source_id', 'session_date', 'learner_source_id'))
+    timings = {(key[0], key[1], str(key[2])): r for key, r in projected_timing([t for t in raw_timings if t.status == 'verified']).items()}
     cells, matrices = matrix_evidence(matrix_directory or settings.ATTENDANCE_DIRECTORY)
     for (uid, sid), row in observed.items():
         s = next(s for s in historical if s.pk == sid)
@@ -157,8 +163,18 @@ def build_snapshot(*, strict=True, matrix_directory=None):
         require(raw and any(c['value'] for c in raw) == row.attended, 'Matrix file and stored observation disagree')
     database_keys = {(u, s.meeting.course_source_id, str(s.session_date)) for (u, sid) in observed for s in historical if s.pk == sid}
     require(set(cells) == database_keys, 'Matrix source cells differ from imported evidence')
+    from types import SimpleNamespace
+    observed = {key: SimpleNamespace(**{**r, 'pk': r['id']}) for key, r in projected_matrix([
+        {'id': r.pk, 'session_id': r.session_id, 'learner_source_id': r.learner_source_id,
+         'attended': r.attended, 'presence_seconds': r.presence_seconds, 'first_join': r.first_join,
+         'last_leave': r.last_leave, 'interval_count': r.interval_count} for r in observed.values()]).items()}
+    mapping, archived = identity_policy()
+    projected_cells = defaultdict(list)
+    for (uid, cid, day), values in cells.items():
+        if uid not in archived: projected_cells[(mapping.get(uid, uid), cid, day)].extend(values)
+    cells = projected_cells
     occurrences = list(TeamsOccurrence.objects.select_related('series').order_by('key'))
-    future_timing = {(r.learner_source_id, r.occurrence_id): r for r in TeamsOccurrenceAttendance.objects.order_by('occurrence_id', 'learner_source_id')}
+    future_timing = projected_timing(TeamsOccurrenceAttendance.objects.order_by('occurrence_id', 'learner_source_id'), occurrence=True)
     report_evidence = list(TeamsReportEvidence.objects.order_by('series_id', 'report_id', 'sha256').values())
     source_times = [run.created_at] + [r['retrieved_at'] for r in report_evidence]
     asof = iso(max(source_times))
@@ -167,6 +183,22 @@ def build_snapshot(*, strict=True, matrix_directory=None):
                 'policy_sha256': run.policy_sha256, 'registry_sha256': run.registry_sha256},
                 'records': {}, 'occurrences': {}, 'report_revisions': [],
                 'pending_discovery': list(TeamsDiscoveryState.objects.values('key', 'pending_events'))}
+    identity_version = None
+    if restored:
+        expected = projection(identity.snapshot)
+        require(set(expected.learners) == {r['source_id'] for r in learners} and set(expected.enrollments) == set(pairs),
+                'Active identity projection disagrees with approved source policy')
+        identity_version = {'revision': identity.revision, 'source_sha256': identity.snapshot.sha256,
+            'audit_sha256': digest(list(IdentityOperation.objects.filter(applied_at__isnull=False).order_by('created_at')
+                .values('kind', 'revision', 'snapshot_sha256', 'request', 'result')))}
+        evidence['identity_version'] = identity_version
+        evidence['original_registry'] = list(OriginalLearner.objects.order_by('source_id').values())
+        for original in evidence['original_registry']:
+            if original['group_id']: original['group_id'] = str(original['group_id'])
+        evidence['original_timing_records'] = [{'id': t.pk, 'learner_source_id': t.learner_source_id,
+            'course_source_id': t.course_source_id, 'date': str(t.session_date), 'status': t.status,
+            'provenance': t.provenance, 'duration_microseconds': t.duration_microseconds} for t in raw_timings]
+        evidence['identity_archives'] = list(IdentityEvidenceArchive.objects.order_by('key').values('key', 'reason', 'payload', 'needs_review'))
     # Datetimes in the private raw report archive are serialized explicitly.
     for r in report_evidence:
         r['retrieved_at'] = iso(r['retrieved_at']); evidence['report_revisions'].append(r)
@@ -180,6 +212,11 @@ def build_snapshot(*, strict=True, matrix_directory=None):
             LectureID=lecture, ObservedDate=str(day), OriginalEvidenceRef=key,
             ReasonCode=reason, State='Open')
 
+    if restored:
+        for hold in evidence['identity_archives']:
+            if hold['needs_review']:
+                review('identity-hold:'+hold['key'], 'IdentitySeparationReview', reason=hold['reason'])
+                evidence['records']['identity-hold:'+hold['key']] = hold['payload']
     for r in learners:
         add('AT_Learners', LearnerID=str(r['source_id']), LearnerName=r['name'], RegisteredEmail=r['email'], IdentityRegistryVersion=registry_hash, Active=True)
     for uid, cid in pairs:
@@ -253,7 +290,8 @@ def build_snapshot(*, strict=True, matrix_directory=None):
             rows_by_course[cid].append(tables['AT_Attendance'][-1])
             if flagged: review(key, 'AttendanceReview', uid, cid, lecture, s['session_date'], reason)
             elif seconds is not None and seconds < 1800: review(key, 'ShortVisit', uid, cid, lecture, s['session_date'], reason)
-    for (uid, cid, day), t in timings.items():
+    for t in raw_timings:
+        uid, cid, day = t.learner_source_id, t.course_source_id, str(t.session_date)
         if t.status != 'verified':
             key = f'pending:{uid}:{cid}:{day}'
             review(key, 'HistoricalTimingPending', uid, cid, day=day, reason=t.status)
@@ -295,16 +333,16 @@ def build_snapshot(*, strict=True, matrix_directory=None):
         'dated_lectures': len(historical), 'historical_decisions': len(historical_rows), 'historical_timing': sum(r['TimingEvidenceStatus']=='Verified' for r in historical_rows),
         'historical_corrections': sum(r['corrected'] for r in index.decisions.values()), 'historical_reviews': sum(r['needs_review'] for r in index.decisions.values()),
         'historical_timed_dates': len({r['LectureID'] for r in historical_rows if r['TimingEvidenceStatus']=='Verified'}),
-        'pending_historical_pairs': sum(t.status!='verified' for t in timings.values()), 'new_verified_lectures': sum(index.new_occurrences.values()),
+        'pending_historical_pairs': sum(t.status!='verified' for t in raw_timings), 'new_verified_lectures': sum(index.new_occurrences.values()),
         'attendance_rows': len(tables['AT_Attendance']), 'review_rows': len(tables['AT_Review'])}
-    if strict:
+    if strict and not restored:
         require(all(totals[k] == v for k, v in BASELINE.items()), 'Approved historical export baseline changed; review before publishing')
     for tab, rows in tables.items():
         key = HEADERS[tab][0]
         require(len({r[key] for r in rows}) == len(rows), 'Duplicate export key')
     for row in tables['AT_Attendance']: row['RowHash'] = digest(row)
     payload = {'schema_version': SCHEMA_VERSION, 'policy_version': RULE_VERSION, 'source_as_of': asof,
-               'totals': totals, 'tables': tables, 'evidence': evidence}
+               'totals': totals, 'tables': tables, 'evidence': evidence, 'identity_version': identity_version}
     generation = digest(payload)
     for rows in tables.values():
         for row in rows:

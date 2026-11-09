@@ -184,6 +184,7 @@ class Submission(models.Model):
 
 
 class DashboardAccess(models.Model):
+    can_manage_identities = models.BooleanField(default=False)
     """Grants a (non-staff) user access to the dashboard API. Superusers are always allowed.
 
     Temporary accounts carry an expiry; access is refused after `expires_at`.
@@ -484,3 +485,68 @@ class LectureResource(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["lecture", "provider", "kind", "source_id"], name="unique_lecture_library_resource")]
+
+
+class IdentitySourceSnapshot(models.Model):
+    """Immutable original LMS tables, never the active merged/archive projection."""
+    sha256 = models.CharField(max_length=64, unique=True)
+    tables = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class IdentityState(models.Model):
+    key = models.PositiveSmallIntegerField(primary_key=True, default=1)
+    revision = models.PositiveBigIntegerField(default=0)
+    restored = models.BooleanField(default=False)
+    snapshot = models.ForeignKey(IdentitySourceSnapshot, null=True, on_delete=models.PROTECT)
+
+
+class IdentityGroup(models.Model):
+    import uuid
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    primary_source_id = models.BigIntegerField()
+    active = models.BooleanField(default=True)
+    # Direct parents are retained so undoing a nested merge restores its prior groups.
+    parent_groups = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class OriginalLearner(models.Model):
+    source_id = models.BigIntegerField(primary_key=True)
+    name = models.CharField(max_length=300)
+    email = models.CharField(max_length=300, blank=True)
+    enrollments = models.JSONField(default=list)
+    in_source = models.BooleanField(default=True)
+    archived = models.BooleanField(default=False)
+    group = models.ForeignKey(IdentityGroup, null=True, on_delete=models.PROTECT)
+
+
+class IdentityMembership(models.Model):
+    group = models.ForeignKey(IdentityGroup, on_delete=models.PROTECT, related_name='memberships')
+    original = models.ForeignKey(OriginalLearner, on_delete=models.PROTECT)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['group', 'original'], name='unique_identity_membership')]
+
+
+class IdentityOperation(models.Model):
+    import uuid
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    actor = models.ForeignKey('auth.User', null=True, on_delete=models.SET_NULL)
+    kind = models.CharField(max_length=30)
+    revision = models.PositiveBigIntegerField()
+    snapshot_sha256 = models.CharField(max_length=64)
+    request = models.JSONField(default=dict)
+    preview = models.JSONField(default=dict)
+    result = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    applied_at = models.DateTimeField(null=True)
+
+
+class IdentityEvidenceArchive(models.Model):
+    """Retained pre-restoration observations and evidence needing identity review."""
+    key = models.CharField(max_length=64, unique=True)
+    reason = models.CharField(max_length=100)
+    payload = models.JSONField()
+    needs_review = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)

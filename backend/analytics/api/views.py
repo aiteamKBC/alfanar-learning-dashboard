@@ -1,6 +1,7 @@
 """Read-only JSON API. All data endpoints require an authenticated session."""
 
 from django.contrib.auth import authenticate, login, logout
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.http import Http404
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -61,9 +62,12 @@ def auth_session(request):
 
 
 def _user_payload(user):
-    access = getattr(user, "dashboard_access", None)
+    from .permissions import can_manage_identities
+    owner = can_manage_identities(user)
+    access = None if owner else getattr(user, "dashboard_access", None)
     return {"username": user.get_username(), "name": user.get_full_name() or user.get_username(),
             "temporary": bool(access and access.is_temporary),
+            "can_manage_identities": owner,
             "expires_at": access.expires_at if access else None}
 
 
@@ -117,6 +121,25 @@ def dashboard_charts(request):
 
 
 # --- Learners -----------------------------------------------------------------------------
+
+@api_view(["GET"])
+def learner_export(request):
+    from ..course_labels import COURSE_DISPLAY_ORDER
+    from ..learner_export import module_export
+    try:
+        selected = {int(value) for value in request.query_params.get('courses', '').split(',')}
+    except ValueError:
+        raise ValidationError({'courses': 'Select one or more valid modules.'})
+    if not selected or not selected.issubset(COURSE_DISPLAY_ORDER):
+        raise ValidationError({'courses': 'Select only the four dashboard modules.'})
+    file_type = request.query_params.get('file_type', 'xlsx')
+    if file_type not in ('xlsx', 'csv') or (file_type == 'csv' and len(selected) != 1):
+        raise ValidationError({'file_type': 'Use Excel for multiple modules, or CSV for one module.'})
+    with transaction.atomic():  # one consistent read snapshot, including concurrent identity changes
+        if Course.objects.filter(source_id__in=selected).count() != len(selected):
+            raise ValidationError({'courses': 'A selected module is not available.'})
+        return module_export([cid for cid in COURSE_DISPLAY_ORDER if cid in selected], file_type)
+
 
 @api_view(["GET"])
 def learner_list(request):
