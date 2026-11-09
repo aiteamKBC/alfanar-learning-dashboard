@@ -6,6 +6,13 @@ export const pct = (v: number | null | undefined, digits = 1) =>
   v === null || v === undefined ? '—' : `${Number(v).toFixed(digits).replace(/\.0$/, '')}%`
 export const ratio = (a: number, b: number) => `${nf.format(a)} / ${nf.format(b)}`
 
+/** Verified attendance only: identical whole-minute formatting in overview and detail. */
+export function attendanceHours(seconds: number | null | undefined) {
+  if (seconds === null || seconds === undefined) return 'N/A'
+  if (seconds > 0 && seconds < 60) return '<1m'
+  return `${Math.floor(seconds / 3600)}h ${Math.floor(seconds / 60) % 60}m`
+}
+
 export function dateTime(v: string | null | undefined, withTime = true) {
   if (!v) return '—'
   const d = new Date(v)

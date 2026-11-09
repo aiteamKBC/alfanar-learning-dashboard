@@ -4,7 +4,7 @@ import type { MatrixAttendance, ModuleProgress } from '@/api/types'
 import AttendanceScope from '@/components/common/AttendanceScope.vue'
 import Icon from '@/components/common/Icon.vue'
 import InfoTip from '@/components/common/InfoTip.vue'
-import { dateTime, pct } from '@/utils/format'
+import { attendanceHours, dateTime, pct } from '@/utils/format'
 
 /** Delivered Teams sessions for one learner in one module, with a summary footer. */
 const props = defineProps<{ attendance: MatrixAttendance; definition?: string; module?: ModuleProgress }>()
@@ -118,7 +118,8 @@ function timingDuration(seconds: number | null) {
             <td class="border-t-2 border-line-strong px-3 py-2.5 tabular"><b>{{ counts.attended }}</b> attended · {{ counts.absent }} absent · {{ counts.brief }} brief · {{ counts.none }} Not Available<span v-if="counts.review"> · {{ counts.review }} Review</span></td>
             <td class="border-t-2 border-line-strong px-3 py-2.5" />
             <td class="border-t-2 border-line-strong px-3 py-2.5" />
-            <td class="border-t-2 border-line-strong px-3 py-2.5" />
+            <td data-total-attended-duration class="border-t-2 border-line-strong px-3 py-2.5 font-semibold tabular whitespace-nowrap"
+              :title="timingDuration(attendance.verified_attendance_seconds)">{{ attendanceHours(attendance.verified_attendance_seconds) }}</td>
             <td class="border-t-2 border-line-strong px-3 py-2.5 font-semibold tabular">{{ pct(attendance.pct) }}</td>
           </tr>
         </tfoot>

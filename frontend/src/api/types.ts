@@ -33,7 +33,11 @@ export interface ModuleProgress { course_id: number; course: string; enrollments
 export interface QuizByModule { course_id: number; course: string; known_quizzes: number; attempted_pairs: number; possible_pairs: number; completion_pct: number | null; mean_latest_score: number | null; pass_rate_pct: number | null }
 export interface CompletionCell { completed: number; possible: number; known_items: number; pct: number | null }
 export interface ActivityCompletion { course_id: number; course: string; by_type: Record<string, CompletionCell> }
-export interface MatrixLearnerRow { learner_id: number; name: string; progress: Record<string, number | null> }
+export interface ModuleLearnerMetrics extends Pick<CourseProgress,
+  'quizzes_attempted' | 'quizzes_known' | 'mean_latest_score' | 'lessons_by_type' | 'assignments_submitted' | 'assignments_known'> {
+  verified_attendance_seconds: number | null
+}
+export interface MatrixLearnerRow { learner_id: number; name: string; progress: Record<string, number | null>; module_metrics: Record<string, ModuleLearnerMetrics> }
 export interface Charts {
   module_progress: ModuleProgress[]
   quiz_by_module: QuizByModule[]
@@ -250,4 +254,5 @@ export interface LiveSession {
 export interface MatrixAttendance extends EnrollmentAttendance {
   sessions: LiveSession[]
   timing_available: boolean
+  verified_attendance_seconds: number | null
 }

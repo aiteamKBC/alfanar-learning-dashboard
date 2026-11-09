@@ -163,7 +163,7 @@ function clearFilters() { router.replace({ query: {} }) }
 
         <ChartCard title="Learner-by-module progress" subtitle="LMS-reported progress — select a cell to open that learner's activity matrix" :info="defs.mean_progress" class="lg:col-span-2">
           <StateBlock :empty="(c?.learner_module_matrix.rows.length ?? 0) === 0" height="10rem">
-            <LearnerModuleHeatmap v-if="c" :matrix="c.learner_module_matrix" />
+            <LearnerModuleHeatmap v-if="c" :matrix="c.learner_module_matrix" :selected-module="course" :definitions="defs" />
           </StateBlock>
         </ChartCard>
       </div>

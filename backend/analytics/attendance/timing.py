@@ -274,18 +274,34 @@ def import_timing(source, policy_path, *, dry_run=False):
         return activate_snapshot(meta, rows, counts, dry_run=dry_run)
 
 
-def attach_timing(sessions, learner_sid, course_sid):
+def verified_timing_records(course_sid, learner_sid=None):
+    """Read the same verified timing evidence in bulk for module presentation."""
+    rows = LectureTiming.objects.filter(
+        import_run__active=True, status=LectureTiming.Status.VERIFIED, course_source_id=course_sid,
+    ).exclude(learner_source_id__in=set(NON_LEARNER_SOURCE_IDS) | set(MERGED_LEARNER_IDS))
+    if learner_sid is not None:
+        rows = rows.filter(learner_source_id=learner_sid)
+    return {(r.learner_source_id, r.course_source_id, r.session_date): r for r in rows.only(
+        'learner_source_id', 'course_source_id', 'session_date', 'first_join', 'last_leave',
+        'duration_microseconds', 'visit_count')}
+
+
+def verified_duration_total(sessions):
+    """Sum displayed, already-merged session durations; no evidence remains None."""
+    seconds = [s['timing']['duration_seconds'] for s in sessions
+               if s['timing']['available'] and s['timing']['duration_seconds'] is not None]
+    return sum(seconds) if seconds else None
+
+
+def attach_timing(sessions, learner_sid, course_sid, *, records=None):
     """Presentation-only fields. Existing attendance fields and summaries stay untouched."""
-    records = {}
-    if learner_sid not in NON_LEARNER_SOURCE_IDS and learner_sid not in MERGED_LEARNER_IDS:
-        records = {r.session_date: r for r in LectureTiming.objects.filter(
-            import_run__active=True, status=LectureTiming.Status.VERIFIED,
-            learner_source_id=learner_sid, course_source_id=course_sid)}
+    if records is None:
+        records = verified_timing_records(course_sid, learner_sid)
     for session in sessions:
         if session.get('occurrence_key'):
             continue  # occurrence-scoped timing must never be replaced by a date-scoped historical row
-        record = records.get(session["date"])
-        if (course_sid, session["date"]) in AMBIGUOUS_DATES:
+        record = records.get((learner_sid, course_sid, session["date"]))
+        if (course_sid, session["date"]) in AMBIGUOUS_DATES or learner_sid in NON_LEARNER_SOURCE_IDS or learner_sid in MERGED_LEARNER_IDS:
             record = None
         session["timing"] = {
             "available": record is not None, "timezone": "UTC",

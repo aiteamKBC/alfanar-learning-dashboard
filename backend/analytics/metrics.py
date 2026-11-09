@@ -20,6 +20,7 @@ from django.db.models import Count, Max, Q, Sum
 
 from .attendance import confirmed
 from .attendance import metrics as att
+from .attendance.timing import attach_timing, verified_duration_total, verified_timing_records
 from .course_labels import course_order_key
 
 from .models import (
@@ -299,11 +300,20 @@ def charts(course_id=None, engagement=None, activity_type=None) -> dict:
     module_cols = [{"course_id": courses[cid].source_id, "course": courses[cid].display_title}
                    for cid in sorted(by_course, key=lambda c: courses[c].display_order_key)]
     rows = defaultdict(dict)
+    module_metrics = defaultdict(dict)
     names = {}
+    timing_records = verified_timing_records(course_id) if course_id else None
     for e in enrollments:
         rows[e.learner.source_id][e.course.source_id] = e.progress_pct
         names[e.learner.source_id] = e.learner.name
-    matrix = [{"learner_id": lid, "name": names[lid], "progress": rows[lid]}
+        if course_id:
+            payload = enrollment_payload(e, stats[e.id], cat, index)
+            module_metrics[e.learner.source_id][e.course.source_id] = {
+                key: payload[key] for key in ('quizzes_attempted', 'quizzes_known', 'mean_latest_score',
+                    'lessons_by_type', 'assignments_submitted', 'assignments_known')}
+            module_metrics[e.learner.source_id][e.course.source_id]['verified_attendance_seconds'] = verified_duration_total(
+                _timed_sessions(index, e.learner.source_id, e.course.source_id, records=timing_records))
+    matrix = [{"learner_id": lid, "name": names[lid], "progress": rows[lid], "module_metrics": module_metrics[lid]}
               for lid in sorted(rows, key=lambda l: names[l].lower())]
 
     return {
@@ -460,6 +470,13 @@ def learner_detail(learner) -> dict:
     }
 
 
+def _timed_sessions(index, learner_sid, course_sid, *, records=None):
+    matrix_calendar = any(s["meeting__evidence_source"] in ("attendance_matrix", "graph_occurrence")
+                          for s in index.sessions_by_course.get(course_sid, []))
+    sessions = index.sessions_for(learner_sid, course_sid) if index.enrollment(learner_sid, course_sid)["available"] or matrix_calendar else []
+    return attach_timing(sessions, learner_sid, course_sid, records=records)
+
+
 def module_matrix(enrollment: Enrollment) -> dict:
     activities = list(Activity.objects.filter(course_id=enrollment.course_id).order_by("source_id"))
     lessons = {r.activity_id: r for r in LessonRecord.objects.filter(enrollment=enrollment)}
@@ -528,13 +545,10 @@ def module_matrix(enrollment: Enrollment) -> dict:
     index = att.AttendanceIndex()
     learner_sid, course_sid = enrollment.learner.source_id, enrollment.course.source_id
     summary_att = index.enrollment(learner_sid, course_sid)
-    from .attendance.timing import attach_timing
-    matrix_calendar = any(s["meeting__evidence_source"] in ("attendance_matrix", "graph_occurrence")
-                          for s in index.sessions_by_course.get(course_sid, []))
-    sessions = index.sessions_for(learner_sid, course_sid) if summary_att["available"] or matrix_calendar else []
-    sessions = attach_timing(sessions, learner_sid, course_sid)
+    sessions = _timed_sessions(index, learner_sid, course_sid)
     attendance = {**summary_att, "sessions": sessions,
-                  "timing_available": any(s["timing"]["available"] for s in sessions)}
+                  "timing_available": any(s["timing"]["available"] for s in sessions),
+                  "verified_attendance_seconds": verified_duration_total(sessions)}
     if not index.has_data(course_sid):
         attendance["reason"] = ("No Microsoft Teams meeting is mapped to this module, so delivered sessions and "
                                 "attendance are not available.")

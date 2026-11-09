@@ -144,6 +144,20 @@ class TeamsDiscoveryTests(TestCase):
         self.assertEqual(rows[0]['date'],rows[1]['date'])
         self.assertEqual(rows[1]['timing']['last_leave'].date(),dt.date(2026,2,6))
 
+    def test_overview_and_detail_total_distinct_same_day_occurrences(self):
+        self.lecture(rid='morning');self.lecture(rid='evening',start='2026-02-05T23:30:00Z')
+        self.sync()
+        detail=self.matrix()
+        rows=metrics.charts(course_id=83334)['learner_module_matrix']['rows']
+        learner=next(r for r in rows if r['learner_id']==101)
+        self.assertEqual(detail['verified_attendance_seconds'],5400)
+        self.assertEqual(learner['module_metrics'][83334]['verified_attendance_seconds'],5400)
+        # Brief timing is real attended time even when it does not qualify as Present.
+        brief=next(r for r in rows if r['learner_id']==106)
+        self.assertEqual(brief['module_metrics'][83334]['verified_attendance_seconds'],2400)
+        missing=next(r for r in rows if r['learner_id']==107)
+        self.assertIsNone(missing['module_metrics'][83334]['verified_attendance_seconds'])
+
     def test_new_meeting_id_discovered_from_exact_join_url(self):
         self.lecture(mid='BRAND-NEW');result=self.sync()
         self.assertEqual(result['counts']['lectures_added'],1)
