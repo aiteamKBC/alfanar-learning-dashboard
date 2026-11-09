@@ -55,9 +55,11 @@ def auth_session(request):
 
 
 def _user_payload(user):
+    from .permissions import can_manage_identities
     access = getattr(user, "dashboard_access", None)
     return {"username": user.get_username(), "name": user.get_full_name() or user.get_username(),
             "temporary": bool(access and access.is_temporary),
+            "can_manage_identities": can_manage_identities(user),
             "expires_at": access.expires_at if access else None}
 
 

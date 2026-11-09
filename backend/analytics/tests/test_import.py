@@ -231,17 +231,13 @@ class LearnerMergeTests(TestCase):
     """Verified duplicate accounts are attributed to one learner without losing any record."""
 
     def test_configured_merges(self):
-        from analytics.importer.identities import MERGED_LEARNER_IDS
-        self.assertEqual(MERGED_LEARNER_IDS, {1056: 760, 1058: 753, 1062: 748, 779: 1229,
-                                             743: 1229, 746: 763, 1221: 763, 1222: 763,
-                                             758: 1059, 1038: 1059})
-        self.assertFalse(set(MERGED_LEARNER_IDS) & set(MERGED_LEARNER_IDS.values()))  # no chains
+        from analytics.importer.identities import MERGED_LEARNER_IDS, LEGACY_MANUAL_MERGES
+        self.assertEqual(MERGED_LEARNER_IDS, {})
+        self.assertEqual(len(LEGACY_MANUAL_MERGES), 10)
+        self.assertFalse(set(LEGACY_MANUAL_MERGES) & set(LEGACY_MANUAL_MERGES.values()))
 
     def _norm(self, merges, tables=None):
-        from unittest import mock
-        from analytics.importer import normalize as norm
-        with mock.patch.dict(norm.MERGED_LEARNER_IDS, merges, clear=True):
-            return normalize(tables or build_tables())
+        return normalize(tables or build_tables(), merges=merges)
 
     def test_merge_combines_modules_and_keeps_all_records(self):
         base = self._norm({})

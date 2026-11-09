@@ -83,6 +83,7 @@ class Command(BaseCommand):
             user.user_permissions.clear()
 
             access, _ = DashboardAccess.objects.get_or_create(user=user)
+            access.can_manage_identities = True
             access.is_temporary = True
             access.expires_at = timezone.now() + dt.timedelta(days=days)
             access.revoked_at = None

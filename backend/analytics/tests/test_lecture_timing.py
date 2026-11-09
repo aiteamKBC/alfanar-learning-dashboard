@@ -138,7 +138,7 @@ class LectureTimingTests(TestCase):
         self.assertFalse(LectureTiming.objects.filter(learner_source_id=111).exists())
 
     def test_excluded_and_noncanonical_accounts_never_match(self):
-        for uid in (next(iter(NON_LEARNER_SOURCE_IDS)), next(iter(MERGED_LEARNER_IDS))):
+        for uid in NON_LEARNER_SOURCE_IDS:
             learner = Learner.objects.create(source_id=uid, name="Excluded fictional", email="l2-alt@example.invalid")
             Enrollment.objects.create(learner=learner, course=self.course)
             self.run_import()

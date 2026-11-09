@@ -1,9 +1,12 @@
 from django.contrib import admin
 from django.urls import include, path
 
-from analytics.api import views
+from analytics.api import views, identity_views
 
 api = [
+    path("identities", identity_views.registry),
+    path("identities/preview", identity_views.preview),
+    path("identities/confirm", identity_views.confirm),
     path("auth/session", views.auth_session),
     path("auth/login", views.auth_login),
     path("auth/logout", views.auth_logout),

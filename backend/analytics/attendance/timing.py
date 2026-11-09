@@ -90,8 +90,8 @@ def prepare_tables(tables, policy, source_meta):
     learners, by_email, ambiguous_emails = registry_lookup()
     eligible_ids = {sid for sid, _, _ in learners} - set(NON_LEARNER_SOURCE_IDS) - set(MERGED_LEARNER_IDS)
     by_email = {email: uid for email, uid in by_email.items() if uid in eligible_ids}
-    enrollments = set(Enrollment.objects.filter(learner__source_id__in=eligible_ids)
-                      .values_list("learner__source_id", "course__source_id"))
+    from ..identity import source_enrollments
+    enrollments = source_enrollments()
     courses = dict(Course.objects.values_list("source_id", "title"))
     calendar = list(LectureSession.objects.filter(delivered=True, meeting__evidence_source="attendance_matrix")
                     .values_list("meeting__course_source_id", "session_date"))
@@ -279,11 +279,9 @@ def verified_timing_records(course_sid, learner_sid=None):
     rows = LectureTiming.objects.filter(
         import_run__active=True, status=LectureTiming.Status.VERIFIED, course_source_id=course_sid,
     ).exclude(learner_source_id__in=set(NON_LEARNER_SOURCE_IDS) | set(MERGED_LEARNER_IDS))
-    if learner_sid is not None:
-        rows = rows.filter(learner_source_id=learner_sid)
-    return {(r.learner_source_id, r.course_source_id, r.session_date): r for r in rows.only(
-        'learner_source_id', 'course_source_id', 'session_date', 'first_join', 'last_leave',
-        'duration_microseconds', 'visit_count')}
+    from ..identity_evidence import projected_timing
+    records = projected_timing(rows)
+    return {key: r for key, r in records.items() if learner_sid is None or key[0] == learner_sid}
 
 
 def verified_duration_total(sessions):

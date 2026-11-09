@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api, qs } from '@/api/client'
+import { api, qs, session } from '@/api/client'
 import type { Charts, FiltersResponse, Matrix, Summary } from '@/api/types'
 import { withModulePerformance } from '@/api/modulePerformance'
 import { useAsync } from '@/api/useAsync'
@@ -12,11 +12,17 @@ import ChartCard from '@/components/dashboard/ChartCard.vue'
 import CompletionHeatmap from '@/components/dashboard/CompletionHeatmap.vue'
 import HBarChart from '@/components/dashboard/HBarChart.vue'
 import KpiCard from '@/components/dashboard/KpiCard.vue'
+import IdentityControls from '@/components/dashboard/IdentityControls.vue'
 import LearnerModuleHeatmap from '@/components/dashboard/LearnerModuleHeatmap.vue'
 import ModuleSnapshot from '@/components/dashboard/ModuleSnapshot.vue'
 import { shortLabel } from '@/components/dashboard/echarts'
 import { num, pct, ratio } from '@/utils/format'
 
+const selectedLearners = ref<number[]>([])
+async function identitiesChanged() {
+  selectedLearners.value = []
+  await Promise.all([filters.reload(), summary.reload(), charts.reload(), allModules.reload()])
+}
 const route = useRoute()
 const router = useRouter()
 
@@ -148,6 +154,7 @@ function clearFilters() { router.replace({ query: {} }) }
     </section>
 
     <!-- KPIs -->
+    <IdentityControls v-if="session.user?.can_manage_identities && c && !c.learner_module_matrix.rows.length" :selected="selectedLearners" :visible-ids="[]" :modules="c.learner_module_matrix.modules" @selection="selectedLearners = $event" @changed="identitiesChanged" />
     <StateBlock :loading="summary.loading.value && !summary.data.value" :error="summary.error.value" :empty="k?.enrollments.value === 0" height="9rem" @retry="summary.reload">
       <section :class="{ 'opacity-60 transition-opacity': summary.loading.value }">
         <h2 class="eyebrow mb-2">Key metrics</h2>
@@ -170,7 +177,7 @@ function clearFilters() { router.replace({ query: {} }) }
 
         <ChartCard title="Learner-by-module progress" subtitle="LMS-reported progress — select a cell to open that learner's activity matrix" :info="defs.mean_progress" class="lg:col-span-2">
           <StateBlock :empty="(c?.learner_module_matrix.rows.length ?? 0) === 0" height="10rem">
-            <LearnerModuleHeatmap v-if="c" :matrix="c.learner_module_matrix" :selected-module="course" :definitions="defs" />
+            <LearnerModuleHeatmap v-if="c" :selected-ids="selectedLearners" @selection="selectedLearners = $event" @changed="identitiesChanged" :matrix="c.learner_module_matrix" :selected-module="course" :definitions="defs" />
           </StateBlock>
         </ChartCard>
       </div>

@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { session } from '@/api/client'
+import IdentityControls from './IdentityControls.vue'
 import type { Charts, Definitions } from '@/api/types'
 import InfoTip from '@/components/common/InfoTip.vue'
 import ProgressBar from '@/components/common/ProgressBar.vue'
 import { attendanceHours, pct, rampColor, rampText, ratio } from '@/utils/format'
 import { shortLabel } from './echarts'
 
-const props = defineProps<{ matrix: Charts['learner_module_matrix']; selectedModule?: string; definitions?: Definitions }>()
+const props = defineProps<{ matrix: Charts['learner_module_matrix']; selectedModule?: string; definitions?: Definitions; selectedIds?: number[] }>()
+const emit = defineEmits<{ selection: [number[]]; changed: [] }>()
+function toggle(id: number) {
+  const selected = props.selectedIds ?? []
+  emit('selection', selected.includes(id) ? selected.filter(i => i !== id) : [...selected, id])
+}
 const search = ref('')
 const selected = computed(() => props.matrix.modules.find((m) => String(m.course_id) === props.selectedModule))
 const rows = computed(() => {
@@ -25,6 +32,7 @@ function completion(done: number | undefined, total: number | undefined) {
       <input v-model="search" type="search" placeholder="Filter learners…" class="focus-ring h-8 w-56 rounded-md border border-line px-2.5 text-sm" aria-label="Filter learners in matrix" />
       <span class="text-xs text-ink-3">{{ rows.length }} learners · cell = LMS-reported progress · blank = not enrolled</span>
     </div>
+    <IdentityControls v-if="session.user?.can_manage_identities" :selected="selectedIds ?? []" :visible-ids="rows.map(r => r.learner_id)" :modules="matrix.modules" @selection="emit('selection', $event)" @changed="emit('changed')" />
     <div class="max-h-[560px] overflow-auto rounded-lg border border-line">
       <table v-if="selected" class="w-full min-w-[1120px] border-separate border-spacing-0 text-[12px]" data-module-performance :data-course-id="selected.course_id">
         <thead class="sticky top-0 z-20 bg-white text-ink-3">
@@ -43,7 +51,8 @@ function completion(done: number | undefined, total: number | undefined) {
         <tbody>
           <tr v-for="r in rows" :key="r.learner_id" :data-learner-id="r.learner_id" class="group hover:bg-gray-50">
             <th scope="row" class="sticky left-0 z-10 border-b border-line bg-white px-3 py-2 text-left font-normal group-hover:bg-gray-50">
-              <RouterLink :to="`/learners/${r.learner_id}?module=${selected.course_id}`" class="focus-ring block max-w-[180px] truncate rounded text-ink hover:text-series-1 hover:underline" :title="r.name">{{ r.name }}</RouterLink>
+              <input v-if="session.user?.can_manage_identities" type="checkbox" class="mr-2 accent-blue-700" :checked="selectedIds?.includes(r.learner_id)" :aria-label="`Select ${r.name} (${r.learner_id})`" @change="toggle(r.learner_id)" />
+              <RouterLink :to="`/learners/${r.learner_id}?module=${selected.course_id}`" class="focus-ring inline-block max-w-[160px] align-middle truncate rounded text-ink hover:text-series-1 hover:underline" :title="r.name">{{ r.name }}</RouterLink>
             </th>
             <td class="border-b border-line px-3 py-2">
               <RouterLink :to="`/learners/${r.learner_id}?module=${selected.course_id}`" class="focus-ring block w-32 rounded" :aria-label="`Open ${r.name}, ${selected.course}`">
@@ -70,6 +79,7 @@ function completion(done: number | undefined, total: number | undefined) {
         <tbody>
           <tr v-for="r in rows" :key="r.learner_id" class="group">
             <th scope="row" class="sticky left-0 z-10 border-b border-line bg-white px-3 py-1.5 text-left font-normal group-hover:bg-gray-50">
+              <input v-if="session.user?.can_manage_identities" type="checkbox" class="mr-2 accent-blue-700" :checked="selectedIds?.includes(r.learner_id)" :aria-label="`Select ${r.name} (${r.learner_id})`" @change="toggle(r.learner_id)" />
               <RouterLink :to="`/learners/${r.learner_id}`" class="focus-ring rounded text-ink hover:text-series-1 hover:underline">{{ r.name }}</RouterLink>
             </th>
             <td v-for="m in matrix.modules" :key="m.course_id" class="border-b border-line p-[3px]">

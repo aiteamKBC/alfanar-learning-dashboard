@@ -212,6 +212,12 @@ class Publisher:
 
     def plan(self, snapshot, remote, state):
         ids = bindings(remote)
+        version = snapshot.get('identity_version')
+        previous_version = (state or {}).get('identity_version')
+        transition = bool(version and version.get('source_sha256') and version.get('audit_sha256'))
+        if previous_version:
+            require(transition and version['revision'] >= previous_version['revision'],
+                    'Identity version rollback refused; publish a new approved undo operation')
         requests = []
         desired = {}; source_tables = copy.deepcopy(snapshot['tables'])
         source_tables['AT_SyncLog'] = [dict(zip(HEADERS['AT_SyncLog'], [snapshot['generation'], snapshot['source_as_of'],
@@ -227,6 +233,22 @@ class Publisher:
                 elif tab == 'AT_SyncLog': rows.append(row)
                 elif tab == 'AT_Review':
                     retained = list(row); retained[HEADERS[tab].index('State')] = 'NoLongerActive'; rows.append(retained)
+                elif transition and tab in ('AT_Learners', 'AT_Enrollments', 'AT_Attendance', 'AT_Summary'):
+                    retained = list(row)
+                    flag = {'AT_Learners': 'Active', 'AT_Enrollments': 'Eligible', 'AT_Attendance': 'Eligible', 'AT_Summary': 'Enrolled'}[tab]
+                    retained[columns.index(flag)] = False if flag != 'Enrolled' else 0
+                    if tab == 'AT_Attendance':
+                        retained[columns.index('ReasonCode')] = 'inactive_identity_version'
+                        retained[columns.index('GenerationID')] = snapshot['generation']
+                        retained[columns.index('RowHash')] = ''
+                        retained[columns.index('RowHash')] = digest(dict(zip(columns, retained)))
+                    if tab == 'AT_Summary':
+                        # Previous generation/state is archived privately. Inactive summaries
+                        # carry no current numerators or denominators.
+                        for field in ('TimedLectures','PossibleObservations','KnownObservations','Present','Absent','Unknown','TimingPairs','ReviewCount'):
+                            retained[columns.index(field)] = 0
+                        for field in ('AttendanceRate','EvidenceCoverage'): retained[columns.index(field)] = ''
+                    rows.append(retained)
                 else: raise ExportError('Export would remove existing source rows; explicit reconciliation required')
             rows.extend(bykey.values()); desired[tab] = rows
             if tab not in ids:
@@ -269,7 +291,7 @@ class Publisher:
         body = {'requests': requests}
         require(len(encoded(body)) <= MAX_BATCH_BYTES, 'Atomic export exceeds the reviewed batch limit; previous generation retained')
         after = {'destination': self.client.spreadsheet_id, 'generation': snapshot['generation'],
-                 'ids': ids, 'unowned': unowned_structure(remote), 'tables': desired}
+                 'ids': ids, 'unowned': unowned_structure(remote), 'tables': desired, 'identity_version': version}
         # This whitelist is checked before any transport mutation.
         allowed = set(ids.values())
         for req in requests:
@@ -283,6 +305,9 @@ class Publisher:
                 'unowned': unowned_structure(remote), 'after': after, 'body': body, 'body_hash': digest(body)}
 
     def apply(self, plan):
+        if plan.get('before'):
+            # Retain every historical effective value before any identity transition.
+            private_json(self.directory / 'history' / (plan['before']['generation'] + '.json'), plan['before'])
         require(plan['destination'] == self.client.spreadsheet_id and digest(plan['body']) == plan['body_hash'], 'Private publication plan is corrupt or belongs to another destination')
         for attempt in range(4):
             remote = self.client.read()

@@ -188,7 +188,7 @@ class _Sheet:
             yield n, {h: (r[i] if i < len(r) else None) for h, i in self.index.items()}
 
 
-def normalize(tables: dict[str, list[list]]) -> Dataset:
+def normalize(tables: dict[str, list[list]], *, merges=None, archived=(), allow_empty=False) -> Dataset:
     ds = Dataset()
     sheets: dict[str, _Sheet] = {}
     for title, rows in tables.items():
@@ -220,7 +220,8 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
     dup_enrol = 0
     excluded: Counter = Counter()  # rows of configured non-learner accounts, per sheet / lesson kind
     excluded_ids: set = set()
-    merges = dict(MERGED_LEARNER_IDS)
+    merges = {k: v for k, v in (merges or {}).items() if k != v}
+    excluded_source_ids = set(NON_LEARNER_SOURCE_IDS) | set(archived)
     merged: Counter = Counter()      # rows re-attributed from a duplicate account, per sheet
     identities: dict = {}            # raw User ID -> identity (first row)
     enrol_src: dict = {}             # (canonical uid, cid) -> raw User IDs that contributed
@@ -234,7 +235,7 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
             uid, cid = to_int(r.get("User ID")), to_int(r.get("Course ID"))
             if uid is None or cid is None:
                 raise ValueError("missing User ID or Course ID")
-            if uid in NON_LEARNER_SOURCE_IDS:
+            if uid in excluded_source_ids:
                 excluded["students"] += 1
                 excluded_ids.add(uid)
                 continue
@@ -288,7 +289,7 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
     for raw, ident in identities.items():
         ds.learners[canon(raw)] = identities.get(canon(raw), ident)
         ds.identities[raw] = {"canonical_source_id": canon(raw), **ident}
-    if not ds.enrollments:
+    if not ds.enrollments and not allow_empty:
         ds.errors.append("No enrollments found in Students worksheet")
         raise ValidationFailed(ds.errors, ds.warnings)
 
@@ -302,7 +303,7 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
         return u
 
     def enrolled(sheet_title, uid, cid, kind=None):
-        if uid in NON_LEARNER_SOURCE_IDS:  # configured non-learner: skipped, not an orphan
+        if uid in excluded_source_ids:  # configured non-learner: skipped, not an orphan
             excluded[sheet_title] += 1
             if kind is not None:
                 excluded[f"lesson:{kind}"] += 1
@@ -540,7 +541,7 @@ def normalize(tables: dict[str, list[list]]) -> Dataset:
                 cid = to_int(row.get("Course ID"))
             except (ValueError, TypeError):
                 continue  # already diagnosed by the academic parser above
-            if raw in NON_LEARNER_SOURCE_IDS or (canon(raw), cid) not in ds.enrollments:
+            if raw in excluded_source_ids or (canon(raw), cid) not in ds.enrollments:
                 continue
             ds.evidence[(sh.title, row_number)] = {
                 "source_learner_id": raw, "canonical_source_id": canon(raw),

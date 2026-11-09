@@ -8,7 +8,7 @@ export class ApiError extends Error {
   }
 }
 
-interface SessionUser { username: string; name: string; temporary?: boolean; expires_at?: string | null }
+interface SessionUser { username: string; name: string; temporary?: boolean; can_manage_identities?: boolean; expires_at?: string | null }
 
 export const session = reactive<{ checked: boolean; authenticated: boolean; user: SessionUser | null }>({
   checked: false,

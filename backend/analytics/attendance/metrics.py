@@ -59,13 +59,12 @@ class AttendanceIndex:
         eligible = (set(Enrollment.objects.exclude(learner__source_id__in=excluded)
                         .values_list("learner__source_id", "course__source_id")) if sessions or new_lectures else set())
         # Learners with verified matrix or timing identities; never display-name matching.
-        self.identified = set(SessionAttendance.objects.exclude(learner_source_id__in=excluded)
-                              .values_list("learner_source_id", flat=True).distinct())
-        self.records: dict[tuple[int, int], dict] = {}  # (learner, session) -> record
-        for a in SessionAttendance.objects.filter(session_id__in=course_of.keys()).values(
-                "id", "session_id", "learner_source_id", "presence_seconds", "attended", "first_join", "last_leave", "interval_count"):
-            if (a["learner_source_id"], course_of[a["session_id"]]) in eligible:
-                self.records[(a["learner_source_id"], a["session_id"])] = a
+        from ..identity_evidence import projected_matrix, projected_timing
+        originals = SessionAttendance.objects.filter(session_id__in=course_of.keys()).values(
+            "id", "session_id", "learner_source_id", "presence_seconds", "attended", "first_join", "last_leave", "interval_count")
+        self.records = {key: a for key, a in projected_matrix(originals).items()
+                        if (key[0], course_of[key[1]]) in eligible}
+        self.identified = {key[0] for key in self.records}
         self.decisions = {}
         self.decision_evidence = {}
         matrix_dates = defaultdict(list)
@@ -74,9 +73,11 @@ class AttendanceIndex:
                 matrix_dates[(s["meeting__course_source_id"], s["session_date"])].append(s["id"])
         from .timing import AMBIGUOUS_DATES
         timing = {}
-        timing_rows = (LectureTiming.objects.filter(import_run__active=True, status=LectureTiming.Status.VERIFIED).values(
-            "id", "course_source_id", "learner_source_id", "session_date", "duration_microseconds", "import_run__fingerprint")
-            if matrix_dates else ())
+        timing_rows = [dict(id=t.pk, course_source_id=t.course_source_id, learner_source_id=t.learner_source_id,
+            session_date=t.session_date, duration_microseconds=t.duration_microseconds,
+            import_run__fingerprint=t.import_run.fingerprint, source_record_ids=t.source_record_ids)
+            for t in projected_timing(LectureTiming.objects.filter(import_run__active=True,
+                status=LectureTiming.Status.VERIFIED).select_related('import_run')).values()] if matrix_dates else []
         for t in timing_rows:
             cid, uid, day = t["course_source_id"], t["learner_source_id"], t["session_date"]
             if (uid, cid) in eligible and len(matrix_dates[(cid, day)]) == 1 and (cid, day) not in AMBIGUOUS_DATES:
@@ -89,6 +90,9 @@ class AttendanceIndex:
                 key = (uid, s["id"])
                 raw, t = self.records.get(key), timing.get(key)
                 decision = decide(raw["attended"] if raw else None, t["duration_microseconds"] if t else None)
+                if raw and raw.get('identity_conflict'):
+                    decision.update(needs_review=True, conflict=True, reason_code='merged_matrix_conflict',
+                        reason='Original identities have contradictory matrix flags; positive evidence is retained for review.')
                 self.decisions[key] = decision
                 self.decision_evidence[key] = {"matrix_record_id": raw["id"] if raw else None,
                                               "timing_record_id": t["id"] if t else None,
@@ -112,8 +116,9 @@ class AttendanceIndex:
                 'starts_at': occurrence.starts_at, 'ends_at': occurrence.ends_at, 'verified_learners': 0,
                 'meeting__course_source_id': cid, 'meeting__subject': occurrence.series.subject,
                 'meeting__evidence_source': 'graph_occurrence'})
-        for observation in TeamsOccurrenceAttendance.objects.filter(occurrence_id__in=occurrence_ids).only(
-                'occurrence_id', 'learner_source_id', 'first_join', 'last_leave', 'duration_microseconds', 'visit_count', 'needs_review'):
+        projected_occurrences = projected_timing(TeamsOccurrenceAttendance.objects.filter(
+            occurrence_id__in=occurrence_ids), occurrence=True)
+        for observation in projected_occurrences.values():
             sid = occurrence_ids[observation.occurrence_id]
             uid, cid = observation.learner_source_id, course_of[sid]
             if (uid, cid) not in eligible: continue
