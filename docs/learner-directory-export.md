@@ -37,16 +37,27 @@ when All Modules is selected. Select All and Clear Selection are available.
 - Exports include all currently enrolled learners in the selected modules, independent
   of directory search, status filters, sorting and pagination. Empty modules retain
   their sheet and column headings.
-- The 15 stable columns are learner ID, learner name, module name, LMS progress,
+- The 20 columns are learner ID, learner name, module name, Mean LMS Progress,
   attendance evidence percentage, quizzes attempted, available quizzes, quiz completion
   percentage, average quiz score, materials completed, applicable materials, material
-  completion percentage, assignments submitted, available assignments, verified duration.
+  completion percentage, assignments submitted, available assignments, verified duration,
+  Last Activity (UTC), attendance present observations, attendance known observations,
+  latest quizzes passed and latest quizzes graded. The latter four counts preserve the
+  secondary information already displayed beneath Attendance Evidence and Average Quiz Score.
 - Counts, IDs and percentage values are numeric where known. Percentage values are on
   the 0–100 scale with an Excel percent-label format. Assignment counts are separate
-  numeric columns. Missing values are explicit N/A.
+  numeric columns. Missing labels match the directory: an em dash for progress,
+  `Not Available` for attendance evidence, `No recorded activity` for Last Activity,
+  and N/A for missing scores, durations and unavailable assignment denominators.
+  Unknown assignment denominators do not produce a misleading `0 / N/A` export.
 - Excel durations are numeric day fractions with an elapsed-hours/minutes format, so
   totals over 24 hours stay accurate and exact seconds are retained. CSV durations use
   the same whole-minute labels as the UI. A short verified visit is displayed `<1m`.
+- Last Activity comes directly from the directory's existing `last_activity` field;
+  no login date, sync time or export timestamp is substituted. Excel retains the native
+  UTC datetime (without timezone metadata, which Excel cannot store), displays the same
+  en-GB calendar date as the UI, and names the timezone in the column heading. CSV uses
+  that displayed date. Integer percentages and single-digit minutes are not zero-padded.
 - Excel string cells are explicitly literal strings, never formulas. CSV prefixes
   potentially executable string fields with an apostrophe, including leading controls
   and whitespace before formula characters. Numeric columns remain numeric.

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { completionLabel, exportPath, downloadModules } from '../src/api/learnerDirectory.ts'
-import { attendanceHours } from '../src/utils/format.ts'
+import { attendanceHours, dateTime, pct } from '../src/utils/format.ts'
 
 test('directory percentages keep known zero completions distinct from unknown denominators', () => {
   assert.equal(completionLabel(35, 130, 26.9), '35 / 130 (26.9%)')
@@ -37,4 +37,12 @@ test('failed or unauthorized downloads never become successful file downloads', 
   for (const status of [401, 403, 500]) {
     await assert.rejects(downloadModules([83334], 'xlsx', (async () => new Response('{}', { status })) as typeof fetch))
   }
+})
+
+test('directory dates use UTC calendar boundaries and the exported en-GB display', () => {
+  assert.equal(dateTime('2030-01-01T00:15:42+03:00', false), '31 Dec 2029')
+  assert.equal(dateTime('2030-09-16T13:30:00Z', false), '16 Sept 2030')
+  assert.equal(pct(95), '95%')
+  assert.equal(pct(95.2), '95.2%')
+  assert.equal(pct(null), '\u2014')
 })

@@ -17,7 +17,7 @@ from analytics.importer.service import run_sync
 from analytics.importer.sources import SourcePayload
 from analytics.learner_export import HEADERS, MODULE_SHEETS, attendance_label
 from analytics.models import (Course, DashboardAccess, Enrollment, Learner, LectureSession, LectureTiming,
-    QuizResult, SessionAttendance, TeamsMeeting, TimingImport)
+    QuizResult, SessionAttendance, Submission, TeamsMeeting, TimingImport)
 from .fixtures import build_tables
 
 
@@ -130,17 +130,25 @@ class LearnerDirectoryExportTests(TestCase):
                 expected = [r['learner_id'], r['name'], COURSE_DISPLAY_NAMES[cid], r['mean_progress'], r['attendance']['pct'],
                     r['quizzes_attempted'], r['quizzes_known'] or None, r['quiz_completion_pct'], r['mean_latest_score'],
                     r['lessons_completed'], r['lessons_known'] or None, r['lessons_completion_pct'],
-                    r['assignments_submitted'], r['assignments_known'] or None]
-                self.assertEqual([c.value for c in cells[:-1]], ['N/A' if x is None else x for x in expected])
-                duration = cells[-1].value
+                    r['assignments_submitted'] if r['assignments_known'] else None, r['assignments_known'] or None]
+                self.assertEqual([c.value for c in cells[:14]],
+                    [('\u2014' if i==3 else 'Not Available' if i==4 else 'N/A') if x is None else x for i,x in enumerate(expected)])
+                duration = cells[14].value
                 self.assertEqual(duration.total_seconds() if isinstance(duration, dt.timedelta) else None, r['verified_attendance_seconds'])
+                stamp = dt.datetime.fromisoformat(r['last_activity'].replace('Z','+00:00')).replace(tzinfo=None) if r['last_activity'] else None
+                self.assertEqual(cells[15].value, stamp or 'No recorded activity')
+                self.assertEqual(cells[15].data_type, 'd' if stamp else 's')
+                self.assertEqual(cells[16].value, r['attendance']['attended'] if r['attendance']['available'] else 'Not Available')
+                self.assertEqual(cells[17].value, r['attendance']['expected'] if r['attendance']['available'] else 'Not Available')
+                self.assertEqual(cells[18].value, r['quizzes_passed_latest'] if r['quizzes_graded'] else 'N/A')
+                self.assertEqual(cells[19].value, r['quizzes_graded'] or 'N/A')
                 self.assertNotIn('f', [c.data_type for c in cells])
         response = self.export(kind='csv')
         parsed = list(csv.reader(io.StringIO(response.content.decode('utf-8-sig'))))
         self.assertEqual(parsed[0], list(HEADERS))
         self.assertEqual(len(parsed), 3)
         self.assertEqual(parsed[1][8], '60.0')
-        self.assertEqual(parsed[1][-1], '0h 45m')
+        self.assertEqual(parsed[1][14], '0h 45m')
         # No stale browser snapshot or stored export cache.
         QuizResult.objects.filter(enrollment__learner__source_id=101).update(latest_score=42)
         self.assertEqual(self.workbook().active['I2'].value, 42)
@@ -174,8 +182,8 @@ class LearnerDirectoryExportTests(TestCase):
         LectureTiming.objects.filter(learner_source_id=101, course_source_id=83334).update(duration_microseconds=41_000_000)
         LectureTiming.objects.filter(learner_source_id=102, course_source_id=83334).update(duration_microseconds=0)
         sheet = self.workbook().active
-        short = next(r[-1] for r in sheet.iter_rows(min_row=2) if r[0].value == 101)
-        zero = next(r[-1] for r in sheet.iter_rows(min_row=2) if r[0].value == 102)
+        short = next(r[14] for r in sheet.iter_rows(min_row=2) if r[0].value == 101)
+        zero = next(r[14] for r in sheet.iter_rows(min_row=2) if r[0].value == 102)
         self.assertAlmostEqual(short.value * 86400, 41)
         self.assertEqual(short.number_format, '"<1m"')
         self.assertEqual(zero.value, dt.timedelta())
@@ -224,3 +232,30 @@ class LearnerDirectoryExportTests(TestCase):
 
     def test_short_zero_and_unknown_duration_labels(self):
         self.assertEqual([attendance_label(s) for s in (None,0,41,90061)], ['N/A','0h 0m','<1m','25h 1m'])
+
+    def test_full_directory_contract_includes_dates_attendance_counts_and_pass_counts(self):
+        self.assertEqual(HEADERS[3], 'Mean LMS Progress (%)')
+        self.assertEqual(HEADERS[-5:], ('Last Activity (UTC)', 'Attendance present observations',
+            'Attendance known observations', 'Latest quizzes passed', 'Latest quizzes graded'))
+        timestamp = dt.datetime(2030,1,1,0,15,42,tzinfo=dt.timezone(dt.timedelta(hours=3)))
+        Submission.objects.filter(enrollment__learner__source_id=101).update(updated_at=timestamp)
+        sheet = self.workbook().active
+        cell = next(r[15] for r in sheet.iter_rows(min_row=2) if r[0].value==101)
+        self.assertEqual(cell.value, dt.datetime(2029,12,31,21,15,42))
+        self.assertEqual(cell.data_type,'d')
+        self.assertEqual(cell.number_format,'dd "Dec" yyyy')
+        csv_rows=list(csv.DictReader(io.StringIO(self.export(kind='csv').content.decode('utf-8-sig'))))
+        self.assertEqual(next(r for r in csv_rows if r['Stable learner ID']=='101')['Last Activity (UTC)'], '31 Dec 2029')
+
+    def test_missing_values_and_formats_retain_directory_display_semantics(self):
+        self.timing()
+        sheet = self.workbook().active
+        self.assertEqual(sheet['I2'].number_format, '0"%"')
+        self.assertEqual(sheet['O2'].number_format, '[h]"h" m"m"')
+        risk = self.workbook('121642').active
+        third = next(r for r in risk.iter_rows(min_row=2) if r[0].value==103)
+        self.assertEqual([third[i].value for i in (3,4,8,12,13,14,15)],
+            ['\u2014','Not Available','N/A','N/A','N/A','N/A','No recorded activity'])
+        timestamp = dt.datetime(2030,9,16,13,30,tzinfo=dt.timezone.utc)
+        Submission.objects.filter(enrollment__learner__source_id=101).update(updated_at=timestamp)
+        self.assertEqual(self.workbook().active['P2'].number_format, 'dd "Sept" yyyy')

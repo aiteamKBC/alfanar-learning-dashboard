@@ -61,11 +61,11 @@ function open(id: number) { router.push(`/learners/${id}`) }
               <span v-for="e in r.enrollments" :key="e.course_id" class="truncate rounded-md border border-line bg-white px-1.5 py-0.5 text-[11px] text-ink-2" :title="`${e.course}: ${pct(e.progress_pct, 0)}`">{{ shortLabel(e.course, 15) }}</span>
             </div>
           </td>
-          <td class="w-48 px-4 py-3"><ProgressBar :value="r.mean_progress" /></td>
-          <td class="w-44 px-4 py-3">
+          <td class="w-48 px-4 py-3" data-progress><ProgressBar :value="r.mean_progress" /></td>
+          <td class="w-44 px-4 py-3" data-attendance-evidence>
             <template v-if="r.attendance.available">
               <ProgressBar :value="r.attendance.pct" color="#142c52" />
-              <div class="mt-0.5 text-[11px] text-ink-3 tabular" :title="`${r.attendance.modules_covered} of ${r.attendance.modules_total} modules have known attendance observations`">
+              <div class="mt-0.5 text-[11px] text-ink-3 tabular" data-attendance-counts :title="`${r.attendance.modules_covered} of ${r.attendance.modules_total} modules have known attendance observations`">
                 {{ r.attendance.attended }} / {{ r.attendance.expected }} known sessions
               </div>
               <div class="mt-1 text-[10.5px] text-ink-3">Known observations only; missing excluded</div>
@@ -78,11 +78,11 @@ function open(id: number) { router.push(`/learners/${id}`) }
           <td class="px-4 py-3 tabular" data-average-score>
             <span v-if="r.mean_latest_score !== null" class="font-medium text-ink">{{ pct(r.mean_latest_score) }}</span>
             <span v-else class="text-ink-3" title="No graded quiz attempts recorded">N/A</span>
-            <div v-if="r.quizzes_graded" class="text-[11px] text-ink-3">{{ r.quizzes_passed_latest }} / {{ r.quizzes_graded }} passed</div>
+            <div v-if="r.quizzes_graded" class="text-[11px] text-ink-3" data-quiz-passed>{{ r.quizzes_passed_latest }} / {{ r.quizzes_graded }} passed</div>
           </td>
-          <td class="px-4 py-3 tabular"><template v-if="r.assignments_known"><span class="font-medium text-ink">{{ r.assignments_submitted }}</span><span class="text-ink-3"> / {{ r.assignments_known }}</span></template><span v-else class="text-ink-3">N/A</span></td>
+          <td class="px-4 py-3 tabular" data-assignments><template v-if="r.assignments_known"><span class="font-medium text-ink">{{ r.assignments_submitted }}</span><span class="text-ink-3"> / {{ r.assignments_known }}</span></template><span v-else class="text-ink-3">N/A</span></td>
           <td class="whitespace-nowrap px-4 py-3 tabular" data-attendance-hours>{{ attendanceHours(r.verified_attendance_seconds) }}</td>
-          <td class="px-4 py-3 text-ink-2">
+          <td class="px-4 py-3 text-ink-2" data-last-activity>
             <div class="flex items-center justify-between gap-2">
               <span v-if="r.last_activity" class="whitespace-nowrap">{{ dateTime(r.last_activity, false) }}</span>
               <span v-else class="whitespace-nowrap text-ink-3">No recorded activity</span>
