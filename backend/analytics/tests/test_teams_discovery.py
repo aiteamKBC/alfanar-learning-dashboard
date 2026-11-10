@@ -10,6 +10,8 @@ from unittest.mock import patch
 
 from django.core.management import call_command, CommandError
 from django.test import TestCase
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
 from analytics import metrics
 from analytics.attendance.discovery import DiscoveryInProgress, run_discovery
@@ -19,7 +21,7 @@ from analytics.course_labels import COURSE_DISPLAY_NAMES
 from analytics.management.commands.run_sync_scheduler import ProcessLock
 from analytics.models import (Course, Enrollment, Learner, LectureSession, SessionAttendance, TeamsMeeting,
     TeamsDiscoveredSeries, TeamsDiscoveryRun, TeamsDiscoveryState, TeamsOccurrence,
-    TeamsOccurrenceAttendance, TeamsReportEvidence)
+    TeamsOccurrenceAttendance, TeamsReportEvidence, LectureTiming)
 
 UTC=dt.timezone.utc
 NOW=dt.datetime(2026,2,10,12,tzinfo=UTC)
@@ -181,6 +183,75 @@ class TeamsDiscoveryTests(TestCase):
         self.assertFalse(TeamsOccurrence.objects.filter(status='verified').exists())
         self.assertFalse(TeamsOccurrenceAttendance.objects.exists())
         self.assertTrue(TeamsReportEvidence.objects.filter(complete=False).exists())
+
+    def test_partial_run_keeps_verified_lecture_in_directory_and_timing_without_historical_backfill(self):
+        TeamsMeeting.objects.filter(evidence_source='attendance_matrix').update(mapping_status='approved_rule')
+        historical = (list(LectureSession.objects.values()), list(SessionAttendance.objects.values()),
+                      list(LectureTiming.objects.values()))
+        self.lecture(154268)
+        orphan, _ = self.lecture(135945)
+        self.graph.events.remove(orphan)  # Unrelated report cannot be assigned to a lecture.
+        first = self.sync()
+        self.assertEqual(first['status'], 'partial')
+        self.assertEqual(first['counts']['lectures_added'], 1)
+        self.assertEqual(TeamsOccurrence.objects.count(), 1)
+        self.assertEqual(TeamsOccurrenceAttendance.objects.count(), 6)
+        for course in (None, 154268):
+            rows = {r['learner_id']: r for r in metrics.learner_directory(course_id=course)}
+            for uid in range(101, 108):
+                attendance = rows[uid]['attendance']
+                self.assertEqual(attendance['expected'], 13 if course else 59)
+                self.assertEqual(attendance['attended'], 1 if uid < 106 else 0)
+                # The short visit and missing report are unknown, never new absences.
+                self.assertEqual(attendance['absent'], (1 if course else 4) if uid == 107 else 0)
+                self.assertEqual(rows[uid]['verified_attendance_seconds'],
+                                 2700 if uid < 106 else (1200 if uid == 106 else None))
+        for uid, status in ((101, 'attended'), (106, 'review'), (107, 'unavailable')):
+            detail = self.matrix(uid, 154268)
+            new = [s for s in detail['sessions'] if s.get('occurrence_key')]
+            self.assertEqual(len(new), 1)
+            self.assertEqual(new[0]['status'], status)
+        modules = {r['course_id']: r for r in metrics.charts()['module_progress']}
+        self.assertEqual(modules[154268]['delivered_lectures']['count'], 13)
+        self.assertEqual(modules[135945]['delivered_lectures']['count'], 16)
+        before = metrics.learner_directory()
+        repeat = self.sync()
+        self.assertEqual(repeat['counts']['lectures_added'], 0)
+        self.assertEqual(repeat['counts']['attendance_decisions_changed'], 0)
+        self.assertEqual(before, metrics.learner_directory())
+        self.assertEqual(historical, (list(LectureSession.objects.values()), list(SessionAttendance.objects.values()),
+                                     list(LectureTiming.objects.values())))
+
+    def test_occurrence_audit_is_read_only_and_distinguishes_present_review_and_unknown(self):
+        self.lecture(154268); self.sync()
+        out = io.StringIO()
+        with CaptureQueriesContext(connection) as queries:
+            call_command('audit_teams_occurrence', occurrence_id=TeamsOccurrence.objects.get().pk, stdout=out)
+        self.assertFalse(any(q['sql'].lstrip().upper().startswith(('INSERT', 'UPDATE', 'DELETE', 'REPLACE', 'ALTER')) for q in queries))
+        result = json.loads(out.getvalue())
+        self.assertEqual(result['status'], 'passed')
+        self.assertEqual((result['raw_timing_records'], result['confirmed_present'],
+                          result['short_duration_review'], result['no_timing_unknown']), (6, 5, 1, 1))
+        self.assertEqual(result['official_delivered_lectures'], 13)
+        self.assertFalse(result['historical_backfill_required'])
+        self.assertNotIn('learner101', out.getvalue())
+        self.assertNotIn(ORGANIZER, out.getvalue())
+
+    def test_occurrence_audit_rejects_missing_pending_and_inconsistent_timing(self):
+        with self.assertRaises(CommandError):
+            call_command('audit_teams_occurrence', occurrence_id=999, stdout=io.StringIO())
+        self.lecture(154268); self.sync()
+        occurrence = TeamsOccurrence.objects.get()
+        occurrence.status = 'pending'; occurrence.save()
+        with self.assertRaises(CommandError):
+            call_command('audit_teams_occurrence', occurrence_id=occurrence.pk, stdout=io.StringIO())
+        occurrence.status = 'verified'; occurrence.save()
+        row = occurrence.attendance.first()
+        row.duration_microseconds += 1; row.save()
+        out = io.StringIO()
+        with self.assertRaises(CommandError):
+            call_command('audit_teams_occurrence', occurrence_id=occurrence.pk, stdout=out)
+        self.assertIn('stored_timing_disagrees_with_intervals', json.loads(out.getvalue())['issues'])
 
     def test_late_report_and_longer_correction(self):
         event,report=self.lecture();saved=self.graph.reports.pop((ORGANIZER,'SERIES-83334',report['id']))
