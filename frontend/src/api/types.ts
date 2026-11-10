@@ -212,6 +212,7 @@ export interface EnrollmentAttendance {
   reason?: string
 }
 export interface RollupAttendance {
+  unknown?: number | null
   available: boolean
   attended: number | null
   expected: number | null

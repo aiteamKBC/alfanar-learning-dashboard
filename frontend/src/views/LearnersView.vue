@@ -64,7 +64,7 @@ function goPage(p: number) { setQuery({ page: p > 1 ? String(p) : undefined }, f
         <p class="mt-1 text-sm text-ink-3">Search enrolled learners, then open a profile for module progress and the detailed activity matrix.</p>
       </div>
       <span v-if="list.data.value" class="rounded-full bg-navy-soft px-3 py-1 text-[12px] font-semibold text-navy tabular">{{ list.data.value.count }} learners</span>
-      <LearnerExport :course="course" />
+      <LearnerExport :search="searchInput.trim()" :engagement="engagement" :ordering="ordering" />
     </div>
 
     <div class="panel flex flex-wrap items-end gap-3 p-4">

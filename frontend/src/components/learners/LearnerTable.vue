@@ -44,11 +44,11 @@ const cols = [
   { key: 'modules', label: 'Enrolled modules', sortable: true },
   { key: 'progress', label: 'Mean LMS progress', sortable: true },
   { key: 'attendance', label: 'Attendance evidence', sortable: true },
+  { key: 'attendance_hours', label: 'Total attendance hours', sortable: true },
   { key: 'lessons', label: 'Materials completed', sortable: true },
   { key: 'quizzes', label: 'Quizzes attempted', sortable: true },
   { key: 'quiz_score', label: 'Average Quiz Score', sortable: true },
   { key: 'assignments', label: 'Assignments', sortable: false },
-  { key: 'attendance_hours', label: 'Total attendance hours', sortable: true },
   { key: 'last', label: 'Last activity', sortable: false },
 ]
 function arrow(ordering: string, key: string) {
@@ -101,14 +101,13 @@ function open(id: number) { router.push(`/learners/${id}`) }
           <td class="w-44 px-4 py-3" data-attendance-evidence>
             <template v-if="r.attendance.available">
               <ProgressBar :value="r.attendance.pct" color="#142c52" />
-              <div class="mt-0.5 text-[11px] text-ink-3 tabular" data-attendance-counts :title="`${r.attendance.modules_covered} of ${r.attendance.modules_total} modules have known attendance observations`">
-                {{ r.attendance.attended }} / {{ r.attendance.expected }} known sessions
+              <div class="mt-0.5 text-[11px] text-ink-3 tabular" data-attendance-counts :title="`Confirmed attendance / officially delivered lectures. ${r.attendance.unknown ?? 0} unknown observations.`">
+                {{ r.attendance.attended }} / {{ r.attendance.expected }} lectures
               </div>
-              <div class="mt-1 text-[10.5px] text-ink-3">Known observations only; missing excluded</div>
             </template>
-            <span v-else-if="r.attendance.modules_without_teams_identity" class="text-[12px] text-amber-800" title="No verified source identity: attendance unknown, not counted as absent">Not Available</span>
-            <span v-else class="text-[12px] text-ink-3" title="No qualifying attendance observations for this learner's selected modules">Not Available</span>
+            <span v-else class="text-[12px] text-ink-3" title="No reliable nonzero official lecture total is available">N/A</span>
           </td>
+          <td class="whitespace-nowrap px-4 py-3 tabular" data-attendance-hours>{{ attendanceHours(r.verified_attendance_seconds) }}</td>
           <td class="whitespace-nowrap px-4 py-3 tabular font-medium text-ink" data-materials>{{ completionLabel(r.lessons_completed, r.lessons_known, r.lessons_completion_pct) }}</td>
           <td class="whitespace-nowrap px-4 py-3 tabular" data-quizzes>{{ completionLabel(r.quizzes_attempted, r.quizzes_known, r.quiz_completion_pct) }}</td>
           <td class="px-4 py-3 tabular" data-average-score>
@@ -117,7 +116,6 @@ function open(id: number) { router.push(`/learners/${id}`) }
             <div v-if="r.quizzes_graded" class="text-[11px] text-ink-3" data-quiz-passed>{{ r.quizzes_passed_latest }} / {{ r.quizzes_graded }} passed</div>
           </td>
           <td class="px-4 py-3 tabular" data-assignments><template v-if="r.assignments_known"><span class="font-medium text-ink">{{ r.assignments_submitted }}</span><span class="text-ink-3"> / {{ r.assignments_known }}</span></template><span v-else class="text-ink-3">N/A</span></td>
-          <td class="whitespace-nowrap px-4 py-3 tabular" data-attendance-hours>{{ attendanceHours(r.verified_attendance_seconds) }}</td>
           <td class="px-4 py-3 text-ink-2" data-last-activity>
             <div class="flex items-center justify-between gap-2">
               <span v-if="r.last_activity" class="whitespace-nowrap">{{ dateTime(r.last_activity, false) }}</span>
