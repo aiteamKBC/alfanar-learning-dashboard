@@ -400,6 +400,7 @@ def learner_rollup(enrollment_payloads: list[dict]) -> dict:
 
 
 def learner_directory(search=None, course_id=None, engagement=None, ordering="name") -> list[dict]:
+    from .directory_attendance import DirectoryAttendance
     qs = Enrollment.objects.select_related("course", "learner")
     if course_id:
         qs = qs.filter(course__source_id=course_id)
@@ -412,6 +413,7 @@ def learner_directory(search=None, course_id=None, engagement=None, ordering="na
     stats = enrollment_stats(e.id for e in enrollments)
     cat = catalogue()
     index = att.AttendanceIndex()
+    directory_attendance = DirectoryAttendance(index)
 
     timing_records = {}
     for source_id in {e.course.source_id for e in enrollments}:
@@ -433,6 +435,8 @@ def learner_directory(search=None, course_id=None, engagement=None, ordering="na
             if not payloads:
                 continue
         roll = learner_rollup(payloads)
+        roll['attendance'] = directory_attendance.summary(
+            learners[lid].source_id, [p['course_id'] for p in payloads], roll['attendance'])
         known_materials = sum(p['lessons_known'] for p in payloads)
         durations = [p['verified_attendance_seconds'] for p in payloads
                      if p['verified_attendance_seconds'] is not None]

@@ -41,8 +41,8 @@ test('CSV retains the table column order, IDs, full module names and every displ
   assert.deepEqual(directoryCsvHeaders, [...table.matchAll(/label: '([^']+)'/g)].map(m => m[1]))
   assert.deepEqual(directoryCsvCells(learner()), [
     'Synthetic learner\nID 1', 'Planning, Controlling and Leading a Project\nAdvanced Project and Logistics Management',
-    '38.7%', '75%\n3 / 4 known sessions\nKnown observations only; missing excluded',
-    '35 / 130 (26.9%)', '2 / 4 (50%)', '95.2%\n1 / 2 passed', '0 / 2', '2h 54m', '31 Dec 2029',
+    '38.7%', '75%\n3 / 4 lectures', '2h 54m',
+    '35 / 130 (26.9%)', '2 / 4 (50%)', '95.2%\n1 / 2 passed', '0 / 2', '31 Dec 2029',
   ])
 })
 
@@ -55,10 +55,10 @@ test('missing data remains distinct from known zero activity and zero measured d
     mean_latest_score: null, quizzes_graded: 0, assignments_known: 0,
     verified_attendance_seconds: null, last_activity: null,
   })
-  assert.deepEqual(directoryCsvCells(missing).slice(2), ['—', 'Not Available', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'No recorded activity'])
+  assert.deepEqual(directoryCsvCells(missing).slice(2), ['—', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'No recorded activity'])
   Object.assign(missing, { lessons_known: 10, lessons_completion_pct: 0, quizzes_known: 4, quiz_completion_pct: 0,
     mean_latest_score: 0, quizzes_graded: 1, quizzes_passed_latest: 0, assignments_known: 2, verified_attendance_seconds: 0 })
-  assert.deepEqual(directoryCsvCells(missing).slice(4, 9), ['0 / 10 (0%)', '0 / 4 (0%)', '0%\n0 / 1 passed', '0 / 2', '0h 0m'])
+  assert.deepEqual(directoryCsvCells(missing).slice(4, 9), ['0h 0m', '0 / 10 (0%)', '0 / 4 (0%)', '0%\n0 / 1 passed', '0 / 2'])
   assert.equal(attendanceHours(45), '<1m')
 })
 
@@ -78,8 +78,8 @@ test('CSV has UTF-8 BOM, CRLF records and correctly escaped Unicode, commas, quo
 
 test('assignment ratios stay text in Excel without formulas or visible apostrophes', () => {
   const row = learner(); row.assignments_submitted = 1; row.assignments_known = 3
-  assert.equal(directoryCsvCells(row)[7], '1 / 3')
-  assert.equal(parseCsv(directoryCsv([row]))[1]?.[7], '1\u00a0/\u00a03')
+  assert.equal(directoryCsvCells(row)[8], '1 / 3')
+  assert.equal(parseCsv(directoryCsv([row]))[1]?.[8], '1\u00a0/\u00a03')
 })
 
 test('one download fetches every page with search/status/order, always using All Modules', async () => {

@@ -177,5 +177,5 @@ class LearnerApiTests(ApiTestBase):
         self.assertEqual(self.client.get("/api/learners/103/courses/9001/matrix").status_code, 404)
 
     def test_query_count_bounded(self):
-        with self.assertNumQueries(13):  # Includes one bulk timing read per module, never per learner.
+        with self.assertNumQueries(16):  # Includes three bulk official-calendar reads; never per learner.
             self.client.get("/api/learners")

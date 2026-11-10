@@ -255,7 +255,7 @@ class LearnerDirectoryExportTests(TestCase):
         risk = self.workbook('121642').active
         third = next(r for r in risk.iter_rows(min_row=2) if r[0].value==103)
         self.assertEqual([third[i].value for i in (3,4,8,12,13,14,15)],
-            ['\u2014','Not Available','N/A','N/A','N/A','N/A','No recorded activity'])
+            ['\u2014',0,'N/A','N/A','N/A','N/A','No recorded activity'])  # no confirmed attendance / official lectures
         timestamp = dt.datetime(2030,9,16,13,30,tzinfo=dt.timezone.utc)
         Submission.objects.filter(enrollment__learner__source_id=101).update(updated_at=timestamp)
         self.assertEqual(self.workbook().active['P2'].number_format, 'dd "Sept" yyyy')
