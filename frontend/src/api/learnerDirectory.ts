@@ -9,8 +9,7 @@ export function completionLabel(completed: number, known: number | null | undefi
 // Same columns as LearnerTable: name and ID share its first cell.
 export const directoryCsvHeaders = [
   'Learner', 'Enrolled modules', 'Mean LMS progress', 'Attendance evidence',
-  'Materials completed', 'Quizzes attempted', 'Average Quiz Score', 'Assignments',
-  'Total attendance hours', 'Last activity',
+  'Total attendance hours', 'Materials completed', 'Quizzes attempted', 'Average Quiz Score', 'Assignments', 'Last activity',
 ] as const
 
 export function directoryCsvCells(row: LearnerRow): string[] {
@@ -19,14 +18,14 @@ export function directoryCsvCells(row: LearnerRow): string[] {
     row.enrollments.map(enrollment => enrollment.course).join('\n'),
     pct(row.mean_progress),
     row.attendance.available
-      ? `${pct(row.attendance.pct)}\n${row.attendance.attended} / ${row.attendance.expected} known sessions\nKnown observations only; missing excluded`
-      : 'Not Available',
+      ? `${pct(row.attendance.pct)}\n${row.attendance.attended} / ${row.attendance.expected} lectures`
+      : 'N/A',
+    attendanceHours(row.verified_attendance_seconds),
     completionLabel(row.lessons_completed, row.lessons_known, row.lessons_completion_pct),
     completionLabel(row.quizzes_attempted, row.quizzes_known, row.quiz_completion_pct),
     (row.mean_latest_score === null ? 'N/A' : pct(row.mean_latest_score)) +
       (row.quizzes_graded ? `\n${row.quizzes_passed_latest} / ${row.quizzes_graded} passed` : ''),
     row.assignments_known ? `${row.assignments_submitted} / ${row.assignments_known}` : 'N/A',
-    attendanceHours(row.verified_attendance_seconds),
     row.last_activity ? dateTime(row.last_activity, false) : 'No recorded activity',
   ]
 }
