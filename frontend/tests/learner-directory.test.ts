@@ -40,9 +40,9 @@ test('CSV retains the table column order, IDs, full module names and every displ
   const table = readFileSync(new URL('../src/components/learners/LearnerTable.vue', import.meta.url), 'utf8')
   assert.deepEqual(directoryCsvHeaders, [...table.matchAll(/label: '([^']+)'/g)].map(m => m[1]))
   assert.deepEqual(directoryCsvCells(learner()), [
-    'Synthetic learner\nID 1', 'Planning, Controlling and Leading a Project\nAdvanced Project and Logistics Management',
-    '38.7%', '75%\n3 / 4 lectures', '2h 54m',
-    '35 / 130 (26.9%)', '2 / 4 (50%)', '95.2%\n1 / 2 passed', '0 / 2', '31 Dec 2029',
+    'Synthetic learner ID 1', 'Planning, Controlling and Leading a Project | Advanced Project and Logistics Management',
+    '38.7%', '75% 3 / 4 lectures', '2h 54m',
+    '35 / 130 (26.9%)', '2 / 4 (50%)', '95.2% 1 / 2 passed', '0 / 2', '31 Dec 2029',
   ])
 })
 
@@ -58,21 +58,56 @@ test('missing data remains distinct from known zero activity and zero measured d
   assert.deepEqual(directoryCsvCells(missing).slice(2), ['—', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'No recorded activity'])
   Object.assign(missing, { lessons_known: 10, lessons_completion_pct: 0, quizzes_known: 4, quiz_completion_pct: 0,
     mean_latest_score: 0, quizzes_graded: 1, quizzes_passed_latest: 0, assignments_known: 2, verified_attendance_seconds: 0 })
-  assert.deepEqual(directoryCsvCells(missing).slice(4, 9), ['0h 0m', '0 / 10 (0%)', '0 / 4 (0%)', '0%\n0 / 1 passed', '0 / 2'])
+  assert.deepEqual(directoryCsvCells(missing).slice(4, 9), ['0h 0m', '0 / 10 (0%)', '0 / 4 (0%)', '0% 0 / 1 passed', '0 / 2'])
   assert.equal(attendanceHours(45), '<1m')
 })
 
-test('CSV has UTF-8 BOM, CRLF records and correctly escaped Unicode, commas, quotes and newlines', async () => {
+test('CSV has UTF-8 BOM and escaped Unicode, commas and quotes with one physical line per learner', () => {
   const row = learner(); row.name = 'متعلم, "Example"\nSecond line'
   const text = directoryCsv([row])
   assert.deepEqual([...new TextEncoder().encode(text).slice(0, 3)], [239, 187, 191])
   const parsed = parseCsv(text)
   assert.equal(parsed.length, 2)
   assert.deepEqual(parsed[0], directoryCsvHeaders)
-  assert.deepEqual(parsed[1]?.map(value => value.replaceAll('\u00a0', ' ')), directoryCsvCells(row))
-  for (const name of ['=HYPERLINK("bad")', '+formula', '-formula', '@formula', '  =formula', '\tformula', '\rformula', '\nformula']) {
-    row.name = name
-    assert.equal(parseCsv(directoryCsv([row]))[1]?.[0], `'${name}\nID 1`)
+  assert.deepEqual(parsed[1]?.map(value => value.replaceAll('\u00a0', ' ')),
+    directoryCsvCells(row).map(value => value.replaceAll('\n', ' ')))
+  assert.equal(text.split('\r\n').length, 3) // Header, one learner, trailing terminator.
+  assert.ok(parsed.flat().every(value => !/[\r\n\u2028\u2029]/.test(value)))
+})
+
+test('source line breaks are flattened without losing names, labels or full module titles', () => {
+  const row = learner()
+  row.name = 'Synthetic\r\nlearner\rSecond\nThird\u2028Fourth\u2029Fifth'
+  row.enrollments[0]!.course = 'Planning, Controlling\r\n  and Leading a Project'
+  row.enrollments[1]!.course = 'Advanced Project\n\tand Logistics Management'
+  const original = structuredClone(row)
+  const parsed = parseCsv(directoryCsv([row]))
+  assert.equal(parsed[1]?.[0], 'Synthetic learner Second Third Fourth Fifth ID 1')
+  assert.equal(parsed[1]?.[1], 'Planning, Controlling and Leading a Project | Advanced Project and Logistics Management')
+  assert.ok(parsed.flat().every(value => !/[\r\n\u2028\u2029]/.test(value)))
+  assert.deepEqual(row, original)
+})
+
+test('formula injection protection survives flattening names and module titles', () => {
+  const row = learner()
+  for (const [input, safe] of [
+    ['=HYPERLINK("bad")', '=HYPERLINK("bad")'], ['+formula', '+formula'], ['-formula', '-formula'],
+    ['@formula', '@formula'], ['  =formula', '  =formula'], ['\tformula', '\tformula'],
+    ['\rformula', ' formula'], ['\nformula', ' formula'], ['\r\n  =formula', ' =formula'],
+    ['\u2028=formula', ' =formula'],
+  ]) {
+    row.name = input!
+    assert.equal(parseCsv(directoryCsv([row]))[1]?.[0], `'${safe} ID 1`)
+    row.enrollments = [{ course_id: 83334, course: input!, progress_pct: 50 }]
+    assert.equal(parseCsv(directoryCsv([row]))[1]?.[1], `'${safe}`)
+  }
+})
+
+test('official attendance counts and percentage pass through from the API without recalculation', () => {
+  for (const [attended, expected, percentage] of [[47, 58, 81], [0, 16, 0], [10, 30, 33.3], [38, 58, 65.5]]) {
+    const row = learner()
+    Object.assign(row.attendance, { attended, expected, pct: percentage })
+    assert.equal(parseCsv(directoryCsv([row]))[1]?.[3], `${percentage}% ${attended} / ${expected} lectures`)
   }
 })
 
@@ -104,8 +139,8 @@ test('one download fetches every page with search/status/order, always using All
   assert.equal(result.blob.type, 'text/csv;charset=utf-8')
   const parsed = parseCsv(await result.blob.text())
   assert.equal(parsed.length, 138)
-  assert.equal(parsed[1]?.[0], 'Synthetic learner\nID 1')
-  assert.equal(parsed[137]?.[0], 'Synthetic learner\nID 137')
+  assert.equal(parsed[1]?.[0], 'Synthetic learner ID 1')
+  assert.equal(parsed[137]?.[0], 'Synthetic learner ID 137')
 })
 
 test('all 37 learners are exported in one request, while an empty filter result is header-only', async () => {

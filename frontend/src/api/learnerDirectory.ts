@@ -14,28 +14,33 @@ export const directoryCsvHeaders = [
 
 export function directoryCsvCells(row: LearnerRow): string[] {
   return [
-    `${row.name}\nID ${row.learner_id}`,
-    row.enrollments.map(enrollment => enrollment.course).join('\n'),
+    `${row.name} ID ${row.learner_id}`,
+    row.enrollments.map(enrollment => enrollment.course).join(' | '),
     pct(row.mean_progress),
     row.attendance.available
-      ? `${pct(row.attendance.pct)}\n${row.attendance.attended} / ${row.attendance.expected} lectures`
+      ? `${pct(row.attendance.pct)} ${row.attendance.attended} / ${row.attendance.expected} lectures`
       : 'N/A',
     attendanceHours(row.verified_attendance_seconds),
     completionLabel(row.lessons_completed, row.lessons_known, row.lessons_completion_pct),
     completionLabel(row.quizzes_attempted, row.quizzes_known, row.quiz_completion_pct),
     (row.mean_latest_score === null ? 'N/A' : pct(row.mean_latest_score)) +
-      (row.quizzes_graded ? `\n${row.quizzes_passed_latest} / ${row.quizzes_graded} passed` : ''),
+      (row.quizzes_graded ? ` ${row.quizzes_passed_latest} / ${row.quizzes_graded} passed` : ''),
     row.assignments_known ? `${row.assignments_submitted} / ${row.assignments_known}` : 'N/A',
     row.last_activity ? dateTime(row.last_activity, false) : 'No recorded activity',
   ]
 }
 
 function csvCell(value: string) {
+  // Keep one physical CSV line per learner, including source names with line breaks.
+  // Check the original value before flattening so leading control characters
+  // cannot bypass Excel formula protection.
+  const unsafe = /^[\t\r\n]/.test(value) || /^[=+\-@]/.test(value.trimStart())
+  const singleLine = value.replace(/[ \t]*[\r\n\u2028\u2029]+[ \t]*/g, ' ')
   // Excel parses a bare "1 / 3" as a date even inside CSV quotes. Visually
   // identical nonbreaking spaces keep displayed assignment ratios as text.
-  const text = /^\d+ \/ \d+$/.test(value) ? value.replaceAll(' ', '\u00a0') : value
+  const text = /^\d+ \/ \d+$/.test(singleLine) ? singleLine.replaceAll(' ', '\u00a0') : singleLine
   // CSV quoting does not prevent Excel formula execution in untrusted names.
-  const literal = /^[\t\r\n]/.test(text) || /^[=+\-@]/.test(text.trimStart()) ? `'${text}` : text
+  const literal = unsafe ? `'${text}` : text
   return `"${literal.replace(/"/g, '""')}"`
 }
 
