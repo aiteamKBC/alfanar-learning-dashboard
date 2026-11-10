@@ -1,0 +1,21 @@
+[Unit]
+Description=Alfanar future lecture recordings, transcripts and participation
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=2h
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+User=root
+Group=www-data
+WorkingDirectory=/var/www/alfanar-learning-dashboard/backend
+ExecStart=/var/www/alfanar-learning-dashboard/backend/venv/bin/python /var/www/alfanar-learning-dashboard/deploy/run_lecture_library_sync.py --config /var/lib/alfanar-lecture-library-sync/config.json
+StateDirectory=alfanar-lecture-library-sync
+StateDirectoryMode=0700
+UMask=0077
+TimeoutStartSec=45min
+Restart=on-failure
+RestartSec=15min
+NoNewPrivileges=true
+PrivateTmp=true

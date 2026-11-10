@@ -11,7 +11,8 @@ collected evidence snapshot:
 ```
 
 Keep snapshots, transcripts, Microsoft identifiers and the database out of Git and
-web roots. The import is explicit; this feature does not install a sync scheduler.
+web roots. The full import is explicit. Future incremental updates have a separate
+opt-in scheduler described in [automatic library updates](lecture-library-sync.md).
 The SQLite course/learner registry is read by stable LMS source IDs at request time;
 no registry rows, accounts or enrollments are copied into PostgreSQL. A library
 import uses a PostgreSQL transaction and cannot cascade-delete SQLite evidence.

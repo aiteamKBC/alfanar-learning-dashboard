@@ -455,6 +455,16 @@ class RiskMultiSeriesTests(TestCase):
 
 
 class GraphClientTests(SimpleTestCase):
+    def test_transcript_text_uses_authenticated_graph_path_and_rejects_redirect(self):
+        client, opener = self.build_client([io.BytesIO(b'WEBVTT\n')])
+        self.assertEqual(client.get('/users/test/onlineMeetings/test/transcripts/t/metadataContent', text=True), 'WEBVTT\n')
+        request = opener.open.call_args.args[0]
+        self.assertEqual(request.get_header('Accept'), 'text/vtt')
+        self.assertEqual(request.get_header('Authorization'), 'Bearer synthetic-token')
+        with self.assertRaises(GraphError):
+            client.get('https://example.invalid/transcript', text=True)
+        self.assertEqual(opener.open.call_count, 1)
+
     def build_client(self, responses):
         opener = Mock()
         opener.open.side_effect = [io.BytesIO(json.dumps(r).encode()) if isinstance(r, dict) else r for r in responses]
