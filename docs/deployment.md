@@ -16,7 +16,7 @@ Templates are in [`deploy/`](../deploy). Nothing in this repository changes prod
 | `DJANGO_SECURE_COOKIES` | `true` (secure session/CSRF cookies, SSL redirect, HSTS) | Cookies carry the `Secure` flag in browser dev tools |
 | `DJANGO_BEHIND_PROXY` | `true` only behind nginx, which sets `X-Forwarded-Proto` | No redirect loop |
 | API authentication | Anonymous requests to `/api/learners` get 403 | `curl -s -o /dev/null -w '%{http_code}' https://<domain>/api/learners` returns `403` |
-| Database | `DATABASE_URL=postgres://…`, migrations applied, backups scheduled | `manage.py showmigrations analytics`; `pg_dump` cron |
+| Databases | Existing SQLite remains `default`; only Lecture Library uses its dedicated PostgreSQL alias/schema | Follow [database isolation](postgresql-storage.md); never transfer dashboard data |
 | Google credentials | JSON key at `/etc/alfanar-dashboard/google-sa.json`, owned by `alfanar`, mode `600`, **not** in the repo or web root | `ls -l /etc/alfanar-dashboard/` |
 | Frontend | `npm ci && npm run build` → nginx serves `frontend/dist`; SPA fallback to `index.html` | Deep link `https://<domain>/learners/<learner-id>` loads |
 | Admin static | `manage.py collectstatic` → `/static/` | `/admin/login/` is styled |

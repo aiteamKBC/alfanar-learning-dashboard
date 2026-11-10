@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "analytics",
+    "lecture_library",
 ]
 
 MIDDLEWARE = [
@@ -91,20 +92,10 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-# Database: SQLite by default; PostgreSQL via DATABASE_URL=postgres://user:pass@host:5432/db
-DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-DATABASE_SCHEMA = os.environ.get("DATABASE_SCHEMA", "").strip()
-if DATABASE_URL:
-    from .database import database_from_url
-
-    DATABASES = {"default": database_from_url(DATABASE_URL, DATABASE_SCHEMA)}
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
-        }
-    }
+# All existing data, auth and sessions stay on SQLite. Only library models use PostgreSQL.
+from .database import isolated_databases
+DATABASES, LECTURE_LIBRARY_DATABASE_SCHEMA = isolated_databases(BASE_DIR, os.environ)
+DATABASE_ROUTERS = ['config.database_router.DatabaseRouter']
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

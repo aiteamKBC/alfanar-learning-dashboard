@@ -2,32 +2,46 @@
 from collections import defaultdict
 from django.db.models import Prefetch
 
-from ..models import Enrollment, Learner, LearnerIdentity, LectureCapture, LectureResource
+from django.conf import settings
+from rest_framework.exceptions import APIException
+from ..models import Course, Enrollment, Learner, LearnerIdentity
+from lecture_library.models import LectureCapture, LectureResource
+
+
+def require_database():
+    if settings.DATABASES['lecture_library']['ENGINE'] == 'django.db.backends.dummy':
+        error = APIException('Lecture Library storage is not configured.')
+        error.status_code = 503
+        raise error
+
+
+def courses():
+    return {course.source_id: course for course in Course.objects.using('default').all()}
 
 
 def registry():
-    learners = {x.pk: x for x in Learner.objects.all()}
+    learners = {x.source_id: x for x in Learner.objects.using('default').all()}
     by_source = {x.source_id: x for x in learners.values()}
     emails = defaultdict(set)
     for learner in learners.values():
         if learner.email.strip():
-            emails[learner.email.strip().casefold()].add(learner.pk)
-    for identity in LearnerIdentity.objects.all():
+            emails[learner.email.strip().casefold()].add(learner.source_id)
+    for identity in LearnerIdentity.objects.using('default').all():
         learner = by_source.get(identity.canonical_source_id)
         if learner and identity.email.strip():
-            emails[identity.email.strip().casefold()].add(learner.pk)
+            emails[identity.email.strip().casefold()].add(learner.source_id)
     unique = {email: next(iter(ids)) for email, ids in emails.items() if len(ids) == 1}
     enrolled = defaultdict(set)
-    for cid, lid in Enrollment.objects.values_list("course_id", "learner_id"):
+    for cid, lid in Enrollment.objects.using('default').values_list('course__source_id', 'learner__source_id'):
         enrolled[cid].add(lid)
     return learners, unique, enrolled
 
 
 def scoped_observations(lecture, emails, enrolled):
     return {
-        row.learner_id: row for row in lecture.observations.all()
-        if row.learner_id in enrolled[lecture.course_id]
-        and any(emails.get(email.strip().casefold()) == row.learner_id for email in row.source_emails)
+        row.learner_source_id: row for row in lecture.observations.all()
+        if row.learner_source_id in enrolled[lecture.course_source_id]
+        and any(emails.get(email.strip().casefold()) == row.learner_source_id for email in row.source_emails)
     }
 
 
@@ -39,19 +53,20 @@ def speaking_result(row, emails):
     if method not in {"verified_identity", "meeting_name"} or not evidence_emails:
         return None, None
     # A later registry update must not leave stale speech attributed to a learner.
-    if not all(emails.get(email.strip().casefold()) == row.learner_id for email in evidence_emails):
+    if not all(emails.get(email.strip().casefold()) == row.learner_source_id for email in evidence_emails):
         return None, None
     return row.speaking_seconds, method
 
 
-def lecture_summary(lecture, emails, enrolled):
+def lecture_summary(lecture, emails, enrolled, course_registry):
+    course = course_registry.get(lecture.course_source_id)
     observations = scoped_observations(lecture, emails, enrolled)
     resources = list(lecture.resources.all())
     return {
-        "id": str(lecture.pk), "course_id": lecture.course.source_id if lecture.course else None,
-        "course": lecture.course.display_title if lecture.course else "Alfanar — module unconfirmed", "date": lecture.session_date,
+        "id": str(lecture.pk), "course_id": course.source_id if course else None,
+        "course": course.display_title if course else "Alfanar — module unconfirmed", "date": lecture.session_date,
         "starts_at": lecture.starts_at, "ends_at": lecture.ends_at,
-        "source": lecture.source_label, "learners": len(enrolled[lecture.course_id]),
+        "source": lecture.source_label, "learners": len(enrolled[lecture.course_source_id]),
         "recording_session": lecture.source_label == "Recording session",
         "present": sum(x.attendance == "present" for x in observations.values()),
         "recorded": sum(x.duration_seconds is not None or x.attendance in {"present", "absent", "review"} for x in observations.values()),
@@ -66,21 +81,23 @@ def lecture_summary(lecture, emails, enrolled):
 
 
 def lecture_queryset():
-    return LectureCapture.objects.filter(active=True).select_related("course").prefetch_related(
+    require_database()
+    return LectureCapture.objects.filter(active=True).prefetch_related(
         "observations", Prefetch("resources", queryset=LectureResource.objects.defer("text_content", "vtt_content"))
     )
 
 
 def resolve_lecture(lecture_id):
     """Keep bookmarked fragment URLs usable after a same-day consolidation."""
-    original = LectureCapture.objects.filter(pk=lecture_id).values("active", "course_id", "session_date").first()
+    require_database()
+    original = LectureCapture.objects.filter(pk=lecture_id).values("active", "course_source_id", "session_date").first()
     if not original:
         return None
     if original["active"]:
         return lecture_queryset().filter(pk=lecture_id).first()
     if original["session_date"] is None:
         return None
-    matches = list(lecture_queryset().filter(course_id=original["course_id"], session_date=original["session_date"])[:2])
+    matches = list(lecture_queryset().filter(course_source_id=original["course_source_id"], session_date=original["session_date"])[:2])
     return matches[0] if len(matches) == 1 else None
 
 
@@ -88,7 +105,7 @@ def detail(lecture):
     learners, emails, enrolled = registry()
     observed = scoped_observations(lecture, emails, enrolled)
     rows = []
-    for lid in sorted(enrolled[lecture.course_id], key=lambda pk: (learners[pk].name.casefold(), pk)):
+    for lid in sorted(enrolled[lecture.course_source_id], key=lambda pk: (learners[pk].name.casefold(), pk)):
         learner, row = learners[lid], observed.get(lid)
         speaking_seconds, speaking_match = speaking_result(row, emails)
         rows.append({
@@ -112,7 +129,7 @@ def detail(lecture):
             "url": f"/api/lectures/{lecture.pk}/resources/{asset.pk}" if asset.readable else None,
         })
     return {
-        **lecture_summary(lecture, emails, enrolled), "participants": rows, "resources": assets,
+        **lecture_summary(lecture, emails, enrolled, courses()), "participants": rows, "resources": assets,
         "recording_folder_url": lecture.recording_folder_url or None,
         "timezone": "Africa/Cairo",
     }

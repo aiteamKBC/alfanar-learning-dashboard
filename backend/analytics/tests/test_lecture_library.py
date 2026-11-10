@@ -16,11 +16,25 @@ from analytics.lectures.importer import import_source
 from analytics.lectures.media import open_recording
 from analytics.models import (
     Course, DashboardAccess, Enrollment, Learner, LearnerIdentity,
-    LectureCapture, LectureLearner, LectureResource,
 )
 
 
+from lecture_library.models import LectureCapture, LectureLearner, LectureResource
+
+
 class LectureLibraryTests(TestCase):
+    databases = {'default', 'lecture_library'}
+
+    def test_failed_library_write_rolls_back_only_library_transaction(self):
+        from analytics.database_transfer import manifest
+        before = manifest('default', [Course, Learner, Enrollment, LearnerIdentity])
+        with mock.patch.object(LectureResource.objects, 'update_or_create', side_effect=RuntimeError('Synthetic failure')):
+            with self.assertRaises(RuntimeError):
+                self.load()
+        self.assertEqual(LectureCapture.objects.count(), 0)
+        self.assertEqual(LectureLearner.objects.count(), 0)
+        self.assertEqual(manifest('default', [Course, Learner, Enrollment, LearnerIdentity]), before)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -104,7 +118,7 @@ class LectureLibraryTests(TestCase):
         self.load(source)
         self.assertEqual(LectureCapture.objects.count(), 1)
         self.assertEqual(LectureLearner.objects.count(), 5)
-        self.assertEqual(LectureLearner.objects.get(learner=self.roster[0]).duration_seconds, 7200)
+        self.assertEqual(LectureLearner.objects.get(learner_source_id=self.roster[0].source_id).duration_seconds, 7200)
         pk = self.lecture().pk
         self.load(source)
         self.assertEqual(self.lecture().pk, pk)
@@ -117,7 +131,7 @@ class LectureLibraryTests(TestCase):
         source["attendance_records"]["meeting|second"] = [self.record(x.email, f"new-{i}", second["start"], second["end"]) for i, x in enumerate(self.roster)]
         self.load(source)
         self.assertEqual(LectureCapture.objects.filter(active=True).count(), 1)
-        row = LectureLearner.objects.get(learner=self.roster[0])
+        row = LectureLearner.objects.get(learner_source_id=self.roster[0].source_id)
         self.assertEqual(row.duration_seconds, 14400)
         self.assertEqual(row.first_join.hour, 10)
         self.assertEqual(row.last_leave.hour, 16)
@@ -138,17 +152,17 @@ class LectureLibraryTests(TestCase):
 
     def test_directory_name_alone_does_not_match_speech_and_verified_binding_unions_intervals(self):
         self.load()
-        self.assertIsNone(LectureLearner.objects.get(learner=self.roster[0]).speaking_seconds)
+        self.assertIsNone(LectureLearner.objects.get(learner_source_id=self.roster[0].source_id).speaking_seconds)
         binding = [{"meeting_id": "meeting", "call_id": "report", "speaker_name": self.roster[0].name,
                     "identity_id": "identity-0", "verified": True, "evidence": "Owner-verified identity evidence"}]
         self.load(bindings=binding)
-        row = LectureLearner.objects.get(learner=self.roster[0])
+        row = LectureLearner.objects.get(learner_source_id=self.roster[0].source_id)
         self.assertEqual(row.speaking_seconds, 30)
         self.assertTrue(row.speaker_verified)
         binding[0]["identity_id"] = "outsider"
         with self.assertRaises(ValueError):
             self.load(bindings=binding)
-        self.assertEqual(LectureLearner.objects.get(learner=self.roster[0]).speaking_seconds, 30)
+        self.assertEqual(LectureLearner.objects.get(learner_source_id=self.roster[0].source_id).speaking_seconds, 30)
 
     def speech_source(self):
         source = self.source()
@@ -164,7 +178,7 @@ class LectureLibraryTests(TestCase):
         # Duplicate transcript revisions must not double-count the same utterance.
         source["timed_transcripts"].append(copy.deepcopy(source["timed_transcripts"][0]))
         self.load(source)
-        row = LectureLearner.objects.get(learner=self.roster[0])
+        row = LectureLearner.objects.get(learner_source_id=self.roster[0].source_id)
         self.assertEqual(row.speaking_seconds, 30)
         self.assertEqual(row.speaking_match, "meeting_name")
         self.assertFalse(row.speaker_verified)
@@ -182,14 +196,14 @@ class LectureLibraryTests(TestCase):
         source = self.speech_source()
         source["attendance_records"]["meeting|report"][-2]["identity"]["displayName"] = "Meeting learner zero"
         self.load(source)
-        self.assertIsNone(LectureLearner.objects.get(learner=self.roster[0]).speaking_seconds)
+        self.assertIsNone(LectureLearner.objects.get(learner_source_id=self.roster[0].source_id).speaking_seconds)
         self.assertEqual(self.client.get(self.url()).json()["speaking_covered"], 0)
 
     def test_speech_outside_presence_is_excluded_and_partial_estimate_is_explicit(self):
         source = self.speech_source()
         source["timed_transcripts"][0]["segments"].append({"name": "Meeting learner zero", "start": "2026-10-01T13:00:00Z", "end": "2026-10-01T13:05:00Z"})
         self.load(source)
-        row = LectureLearner.objects.get(learner=self.roster[0])
+        row = LectureLearner.objects.get(learner_source_id=self.roster[0].source_id)
         self.assertEqual(row.speaking_seconds, 30)
         self.assertTrue(row.speaking_partial)
 
@@ -198,11 +212,11 @@ class LectureLibraryTests(TestCase):
         for segment in source["timed_transcripts"][0]["segments"]:
             segment["name"] = "Meeting learner zero junior"
         self.load(source)
-        self.assertIsNone(LectureLearner.objects.get(learner=self.roster[0]).speaking_seconds)
+        self.assertIsNone(LectureLearner.objects.get(learner_source_id=self.roster[0].source_id).speaking_seconds)
         source = self.speech_source()
         source["timed_transcripts"][0]["call_id"] = "unrelated-call"
         self.load(source)
-        self.assertIsNone(LectureLearner.objects.get(learner=self.roster[0]).speaking_seconds)
+        self.assertIsNone(LectureLearner.objects.get(learner_source_id=self.roster[0].source_id).speaking_seconds)
 
     def test_registry_change_revalidates_speaking_emails_even_if_attendance_still_matches(self):
         self.load(self.speech_source())
@@ -235,7 +249,7 @@ class LectureLibraryTests(TestCase):
         self.load(source)
         self.assertEqual(LectureCapture.objects.count(), 1)
         self.assertEqual(self.lecture().source_key, "historical")
-        self.assertEqual(LectureLearner.objects.get(learner=self.roster[0]).duration_seconds, 10800)
+        self.assertEqual(LectureLearner.objects.get(learner_source_id=self.roster[0].source_id).duration_seconds, 10800)
 
     def historical_only_media_source(self):
         source = self.source()
@@ -306,7 +320,7 @@ class LectureLibraryTests(TestCase):
         self.assertEqual(body["readable_transcripts"], 1)
         self.assertEqual(body["speaking_covered"], 1)
         self.assertEqual(body["present"], 5)
-        self.assertEqual(LectureLearner.objects.get(learner=self.roster[0]).duration_seconds, 7200)
+        self.assertEqual(LectureLearner.objects.get(learner_source_id=self.roster[0].source_id).duration_seconds, 7200)
         pk = self.lecture().pk
         self.load(source)
         self.assertEqual(self.lecture().pk, pk)
@@ -324,7 +338,7 @@ class LectureLibraryTests(TestCase):
         source["timed_transcripts"].append({"meeting_id": "meeting", "call_id": "second", "readable": True,
                                              "segments": [{"name": "Meeting learner zero", "start": "2026-10-01T10:00:20Z", "end": "2026-10-01T10:00:40Z"}]})
         self.load(source)
-        row = LectureLearner.objects.get(learner=self.roster[0])
+        row = LectureLearner.objects.get(learner_source_id=self.roster[0].source_id)
         self.assertEqual(row.duration_seconds, 7210)
         self.assertEqual(row.speaking_seconds, 40)
 
@@ -347,9 +361,9 @@ class LectureLibraryTests(TestCase):
                                  "recordings": [{"id": "unconfirmed", "provider": "onedrive", "drive_id": "drive", "createdDateTime": self.start}]})
         self.load(source)
         self.assertEqual(LectureCapture.objects.filter(active=True).count(), 4)
-        local_day = LectureCapture.objects.get(course=self.course, session_date="2026-10-02")
+        local_day = LectureCapture.objects.get(course_source_id=self.course.source_id, session_date="2026-10-02")
         self.assertEqual(local_day.resources.count(), 2)
-        self.assertEqual(LectureCapture.objects.get(course=None).observations.count(), 0)
+        self.assertEqual(LectureCapture.objects.get(course_source_id=None).observations.count(), 0)
 
     def test_undated_evidence_is_not_merged_by_missing_date(self):
         source = self.source()
@@ -361,7 +375,7 @@ class LectureLibraryTests(TestCase):
         self.assertEqual(LectureCapture.objects.filter(active=True).count(), 2)
 
     def test_bookmarked_fragment_and_resource_resolve_to_merged_day(self):
-        old = LectureCapture.objects.create(source_key="old-fragment", course=self.course, session_date="2026-10-01", source_fingerprint="old")
+        old = LectureCapture.objects.create(source_key="old-fragment", course_source_id=self.course.source_id, session_date="2026-10-01", source_fingerprint="old")
         asset = LectureResource.objects.create(lecture=old, kind="transcript", source_id="transcript", organizer_id="owner", meeting_id="meeting", readable=True)
         self.load()
         response = self.client.get(f"/api/lectures/{old.pk}")
@@ -422,7 +436,7 @@ class LectureLibraryTests(TestCase):
         series["recordings"][0].update(provider="onedrive", drive_id="original-drive")
         self.load(source)
         pk = self.lecture().pk
-        self.assertIsNone(self.lecture().course_id)
+        self.assertIsNone(self.lecture().course_source_id)
         body = self.client.get(self.url()).json()
         self.assertIsNone(body["course_id"])
         self.assertEqual(body["participants"], [])
@@ -462,7 +476,7 @@ class LectureLibraryTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content.decode(), "Private source transcript")
         self.assertEqual(response["Cache-Control"], "private, no-store")
-        other = LectureCapture.objects.create(source_key="other", course=self.other_course, source_fingerprint="a")
+        other = LectureCapture.objects.create(source_key="other", course_source_id=self.other_course.source_id, source_fingerprint="a")
         self.assertEqual(self.client.get(f"/api/lectures/{other.pk}/resources/{transcript.pk}").status_code, 404)
         self.assertEqual(self.client.get("/api/lectures?from=bad-date").status_code, 400)
 

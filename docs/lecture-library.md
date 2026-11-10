@@ -1,8 +1,10 @@
 # Lecture library
 
 `/lectures` is an authenticated, additive library. It does not change the existing
-LMS, historical attendance or approved dashboard KPI tables. Apply all migrations,
-then import a privately collected evidence snapshot:
+LMS, historical attendance or approved dashboard KPI tables. Its three models live
+in the independent `lecture_library` app/database. Follow [database isolation and
+deployment](postgresql-storage.md) to prepare PostgreSQL, then import a privately
+collected evidence snapshot:
 
 ```powershell
 .\.venv\Scripts\python backend/manage.py import_lecture_library --source data/lecture-evidence/source-20261109.json
@@ -10,6 +12,9 @@ then import a privately collected evidence snapshot:
 
 Keep snapshots, transcripts, Microsoft identifiers and the database out of Git and
 web roots. The import is explicit; this feature does not install a sync scheduler.
+The SQLite course/learner registry is read by stable LMS source IDs at request time;
+no registry rows, accounts or enrollments are copied into PostgreSQL. A library
+import uses a PostgreSQL transaction and cannot cascade-delete SQLite evidence.
 
 Each lecture shows the current directory learners enrolled in its module. Source
 emails must resolve unambiguously through the current learner/identity registry.

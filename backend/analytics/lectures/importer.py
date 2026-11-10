@@ -14,8 +14,10 @@ from zoneinfo import ZoneInfo
 
 from django.db import transaction
 
-from ..models import Course, LectureCapture, LectureLearner, LectureResource
-from .library import registry
+from ..models import Course
+from lecture_library.models import LectureCapture, LectureLearner, LectureResource
+from config.database_router import LIBRARY_ALIAS
+from .library import registry, require_database
 from .daily import attendance_timing, combine_days
 
 SUBJECTS = {
@@ -95,7 +97,7 @@ def media_window_target(asset, course, prepared):
     duration = (end - start).total_seconds()
     matches = []
     for key, lecture in prepared.items():
-        if lecture["course"] is None or lecture["course"].pk != course.pk or lecture["label"] == "Recording session":
+        if lecture["course"] is None or lecture["course"].source_id != course.source_id or lecture["label"] == "Recording session":
             continue
         anchors = []
         for observation in lecture["observations"].values():
@@ -114,11 +116,12 @@ def media_window_target(asset, course, prepared):
 
 
 def import_source(path, speaker_bindings=None):
+    require_database()
     source = json.loads(Path(path).read_text(encoding="utf-8"))
     digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
     learners, emails, enrolled = registry()
     by_source = {x.source_id: x for x in learners.values()}
-    courses = {x.source_id: x for x in Course.objects.all()}
+    courses = {x.source_id: x for x in Course.objects.using('default').all()}
     tables = source_tables(source)
     historical_learners = {str(x["LearnerID"]): x for x in tables.get("AT_Learners", [])}
     prepared, archived_dates = {}, defaultdict(list)
@@ -135,17 +138,17 @@ def import_source(path, speaker_bindings=None):
             "reports": set(), "observations": {}, "resources": {}, "folder": "",
         }
         if day:
-            archived_dates[(course.pk, day)].append(key)
+            archived_dates[(course.source_id, day)].append(key)
 
     for row in tables.get("AT_Attendance", []):
         lecture = prepared.get(row.get("LectureID"))
         identity = historical_learners.get(str(row.get("LearnerID")), {})
         email = str(identity.get("RegisteredEmail") or "").strip().casefold()
         learner = by_source.get(int(row["LearnerID"]))
-        if not lecture or not learner or emails.get(email) != learner.pk or learner.pk not in enrolled[lecture["course"].pk]:
+        if not lecture or not learner or emails.get(email) != learner.source_id or learner.source_id not in enrolled[lecture["course"].source_id]:
             continue
         duration = row.get("DurationSeconds")
-        lecture["observations"][learner.pk] = {
+        lecture["observations"][learner.source_id] = {
             "source_emails": {email}, "identity_ids": set(), "intervals": [],
             "attendance": {"Present": "present", "Absent": "absent", "Review": "review"}.get(row.get("EffectiveStatus"), "not_available"),
             "first_join": timestamp(row.get("FirstJoinUTC")), "last_leave": timestamp(row.get("LastLeaveUTC")),
@@ -174,7 +177,7 @@ def import_source(path, speaker_bindings=None):
         if records is None or expected is not None and len(records) != expected:
             incomplete += 1
             continue
-        group_key = (course.pk, mid, start, end)
+        group_key = (course.source_id, mid, start, end)
         group = groups.setdefault(group_key, {"course": course, "start": start, "end": end, "mid": mid, "reports": set(), "observations": {}, "speaker_labels": defaultdict(set)})
         group["reports"].add(rid)
         report_groups[(mid, rid)] = group_key
@@ -186,9 +189,9 @@ def import_source(path, speaker_bindings=None):
                 # Include outsiders in ambiguity detection, even though they can
                 # never become learner rows or receive displayed speaking time.
                 identity = record.get("identity", {}).get("id") or email or record["id"]
-                candidate = ("learner", lid) if lid in enrolled[course.pk] else ("external", identity)
+                candidate = ("learner", lid) if lid in enrolled[course.source_id] else ("external", identity)
                 group["speaker_labels"][label].add(candidate)
-            if lid not in enrolled[course.pk]:
+            if lid not in enrolled[course.source_id]:
                 continue
             observation = group["observations"].setdefault(lid, {
                 "source_emails": set(), "identity_ids": set(), "intervals": [],
@@ -218,7 +221,7 @@ def import_source(path, speaker_bindings=None):
     for gkey, group in sorted(groups.items(), key=lambda item: (item[1]["start"], item[1]["mid"])):
         day = group["start"].astimezone(CAIRO).date()
         candidates = []
-        for key in archived_dates[(group["course"].pk, day)]:
+        for key in archived_dates[(group["course"].source_id, day)]:
             old = prepared[key]["observations"]
             if any(
                 lid in old and old[lid]["first_join"] and old[lid]["last_leave"]
@@ -389,11 +392,11 @@ def import_source(path, speaker_bindings=None):
                     verified_intervals[key].append(interval)
                     speech_emails[key].update(lecture["observations"][matched[0]]["source_emails"])
 
-    with transaction.atomic():
+    with transaction.atomic(using=LIBRARY_ALIAS):
         saved, observation_count, resource_count = [], 0, 0
         for key, item in prepared.items():
             lecture, _ = LectureCapture.objects.update_or_create(source_key=key, defaults={
-                "course": item["course"], "session_date": item["day"], "starts_at": item["starts"],
+                "course_source_id": item["course"].source_id if item["course"] else None, "session_date": item["day"], "starts_at": item["starts"],
                 "ends_at": item["ends"], "source_label": item["label"], "report_ids": sorted(item["reports"]),
                 "recording_folder_url": item["folder"], "source_fingerprint": digest, "active": True,
             })
@@ -420,10 +423,10 @@ def import_source(path, speaker_bindings=None):
                                speaking_partial=(key, lid) in partial and not verified)
                 for field in ("source_emails", "identity_ids", "speaking_emails"):
                     row[field] = sorted(row[field])
-                LectureLearner.objects.update_or_create(lecture=lecture, learner_id=lid, defaults=row)
+                LectureLearner.objects.update_or_create(lecture=lecture, learner_source_id=lid, defaults=row)
                 kept_learners.append(lid)
                 observation_count += 1
-            lecture.observations.exclude(learner_id__in=kept_learners).delete()
+            lecture.observations.exclude(learner_source_id__in=kept_learners).delete()
             kept_resources = []
             for (kind, provider, source_id), values in item["resources"].items():
                 asset, _ = LectureResource.objects.update_or_create(lecture=lecture, provider=provider, kind=kind, source_id=source_id, defaults=values)

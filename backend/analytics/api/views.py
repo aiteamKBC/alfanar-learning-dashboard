@@ -18,7 +18,7 @@ from .permissions import has_dashboard_access
 from ..models import ActivityKind, Course, Enrollment, Learner
 from ..lectures import library
 from ..lectures.media import resource_response
-from ..models import LectureResource
+from lecture_library.models import LectureResource
 
 
 class LoginThrottle(SimpleRateThrottle):
@@ -187,7 +187,7 @@ def lecture_list(request):
     queryset = library.lecture_queryset()
     course = _int_param(request, "course")
     if course is not None:
-        queryset = queryset.filter(course__source_id=course)
+        queryset = queryset.filter(course_source_id=course)
     for name, lookup in (("from", "session_date__gte"), ("to", "session_date__lte")):
         value = request.query_params.get(name)
         if value:
@@ -199,7 +199,8 @@ def lecture_list(request):
                 raise ValidationError({name: "Use a valid YYYY-MM-DD date."})
             queryset = queryset.filter(**{lookup: date})
     learners, emails, enrolled = library.registry()
-    queryset = queryset.filter(Q(course_id__in=[cid for cid, ids in enrolled.items() if ids]) | Q(course__isnull=True))
+    course_registry = library.courses()
+    queryset = queryset.filter(Q(course_source_id__in=[cid for cid, ids in enrolled.items() if ids]) | Q(course_source_id__isnull=True))
     count = queryset.count()
     size = min(200, max(1, _int_param(request, "page_size") or 100))
     page = min(max(1, _int_param(request, "page") or 1), max(1, -(-count // size)))
@@ -209,7 +210,7 @@ def lecture_list(request):
         "total_recordings": LectureResource.objects.filter(lecture__in=queryset, kind="recording").count(),
         "playable_recordings": LectureResource.objects.filter(lecture__in=queryset, kind="recording", readable=True).count(),
         "updated_at": queryset.aggregate(last=Max("updated_at"))["last"],
-        "results": [library.lecture_summary(row, emails, enrolled) for row in queryset[(page - 1) * size:page * size]],
+        "results": [library.lecture_summary(row, emails, enrolled, course_registry) for row in queryset[(page - 1) * size:page * size]],
     })
 
 
@@ -218,7 +219,7 @@ def lecture_detail(request, lecture_id):
     lecture = library.resolve_lecture(lecture_id)
     if lecture is None:
         raise Http404
-    if lecture.course_id is not None and not Enrollment.objects.filter(course_id=lecture.course_id).exists():
+    if lecture.course_source_id is not None and not Enrollment.objects.using('default').filter(course__source_id=lecture.course_source_id).exists():
         from rest_framework.exceptions import NotFound
         raise NotFound()
     return Response(library.detail(lecture))
@@ -235,7 +236,7 @@ def lecture_resource(request, lecture_id, resource_id):
         asset = get_object_or_404(LectureResource, lecture=lecture, provider=asset.provider,
                                   kind=asset.kind, source_id=asset.source_id, organizer_id=asset.organizer_id,
                                   meeting_id=asset.meeting_id, drive_id=asset.drive_id)
-    if lecture.course_id is not None and not Enrollment.objects.filter(course_id=lecture.course_id).exists():
+    if lecture.course_source_id is not None and not Enrollment.objects.using('default').filter(course__source_id=lecture.course_source_id).exists():
         from rest_framework.exceptions import NotFound
         raise NotFound()
     return resource_response(request, asset)
