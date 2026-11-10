@@ -68,7 +68,7 @@ async function signOut() {
           class="block rounded-md px-3 py-2.5 text-sm" :class="section === item.key ? 'bg-navy-soft font-semibold text-navy' : 'text-ink-2'">{{ item.label }}</RouterLink>
       </nav>
     </header>
-    <main class="mx-auto max-w-[1480px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+    <main class="mx-auto px-4 py-6 sm:px-6 lg:px-8 lg:py-8" :class="route.name === 'learners' ? 'max-w-none' : 'max-w-[1480px]'">
       <RouterView />
     </main>
     <footer class="mx-auto flex max-w-[1480px] flex-wrap items-center gap-2 px-4 pb-8 text-[11.5px] text-ink-3 sm:px-6 lg:px-8">

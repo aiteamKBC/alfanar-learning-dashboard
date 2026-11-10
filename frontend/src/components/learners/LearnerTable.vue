@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { LearnerRow } from '@/api/types'
 import Avatar from '@/components/common/Avatar.vue'
@@ -7,10 +8,36 @@ import ProgressBar from '@/components/common/ProgressBar.vue'
 import { attendanceHours, dateTime, pct } from '@/utils/format'
 import { completionLabel } from '@/api/learnerDirectory'
 import { shortLabel } from '@/components/dashboard/echarts'
+import { scrollEdges } from './tableScroll'
 
 defineProps<{ rows: LearnerRow[]; ordering: string }>()
 const emit = defineEmits<{ sort: [key: string] }>()
 const router = useRouter()
+const scroller = ref<HTMLDivElement | null>(null)
+const table = ref<HTMLTableElement | null>(null)
+const edges = ref({ left: false, right: false })
+let observer: ResizeObserver | undefined
+
+function updateScroll() {
+  if (scroller.value) edges.value = scrollEdges(scroller.value)
+}
+function scrollTable(direction: number) {
+  const element = scroller.value
+  if (element) element.scrollBy({ left: direction * element.clientWidth * 0.75 })
+}
+onMounted(() => {
+  observer = new ResizeObserver(updateScroll)
+  if (scroller.value) observer.observe(scroller.value)
+  if (table.value) observer.observe(table.value)
+  window.addEventListener('resize', updateScroll)
+  window.visualViewport?.addEventListener('resize', updateScroll)
+  updateScroll()
+})
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  window.removeEventListener('resize', updateScroll)
+  window.visualViewport?.removeEventListener('resize', updateScroll)
+})
 
 const cols = [
   { key: 'name', label: 'Learner', sortable: true },
@@ -33,8 +60,17 @@ function open(id: number) { router.push(`/learners/${id}`) }
 </script>
 
 <template>
-  <div class="card matrix-scroll overflow-x-auto">
-    <table class="w-full min-w-[1540px] text-sm" data-learner-directory>
+  <div class="min-w-0 max-w-full">
+    <div v-if="edges.left || edges.right" class="mb-2 flex justify-end gap-2 text-xs text-ink-2">
+      <button v-if="edges.left" type="button" class="focus-ring inline-flex min-h-8 items-center gap-1 rounded-md px-2 hover:bg-navy-soft" aria-label="Scroll table left" @click="scrollTable(-1)">
+        <Icon name="chevron" :size="14" class="rotate-180" /> Scroll back
+      </button>
+      <button v-if="edges.right" type="button" class="focus-ring inline-flex min-h-8 items-center gap-1 rounded-md px-2 hover:bg-navy-soft" aria-label="Scroll table right" @click="scrollTable(1)">
+        Scroll to see more <Icon name="chevron" :size="14" />
+      </button>
+    </div>
+    <div ref="scroller" class="card directory-scroll focus-ring max-w-full overflow-x-auto" tabindex="0" role="region" aria-label="Learner directory table" @scroll.passive="updateScroll">
+    <table ref="table" class="w-full min-w-[1540px] text-sm" data-learner-directory>
       <thead class="border-b border-line bg-subtle/70 text-left">
         <tr>
           <th v-for="c in cols" :key="c.key" class="eyebrow whitespace-nowrap px-4 py-3" :class="{ 'sticky left-0 z-10 w-40 min-w-40 max-w-40 bg-[#f6f5f1] sm:w-auto sm:min-w-0 sm:max-w-none': c.key === 'name' }" :aria-sort="ordering === c.key ? 'ascending' : ordering === `-${c.key}` ? 'descending' : undefined">
@@ -92,5 +128,25 @@ function open(id: number) { router.push(`/learners/${id}`) }
         </tr>
       </tbody>
     </table>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.directory-scroll {
+  scroll-behavior: smooth;
+  overscroll-behavior-x: contain;
+  scrollbar-width: auto;
+  scrollbar-color: #8a95a6 #f3f2ee;
+}
+.directory-scroll::-webkit-scrollbar { height: 12px; }
+.directory-scroll::-webkit-scrollbar-track { background: #f3f2ee; }
+.directory-scroll::-webkit-scrollbar-thumb {
+  background: #8a95a6;
+  border: 3px solid #f3f2ee;
+  border-radius: 6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .directory-scroll { scroll-behavior: auto; }
+}
+</style>
