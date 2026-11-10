@@ -93,10 +93,11 @@ WSGI_APPLICATION = "config.wsgi.application"
 
 # Database: SQLite by default; PostgreSQL via DATABASE_URL=postgres://user:pass@host:5432/db
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+DATABASE_SCHEMA = os.environ.get("DATABASE_SCHEMA", "").strip()
 if DATABASE_URL:
-    import dj_database_url
+    from .database import database_from_url
 
-    DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=60)}
+    DATABASES = {"default": database_from_url(DATABASE_URL, DATABASE_SCHEMA)}
 else:
     DATABASES = {
         "default": {
