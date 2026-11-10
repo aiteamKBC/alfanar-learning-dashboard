@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh the Alfanar lecture library every hour
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=2min
+Unit=alfanar-lecture-library.service
+
+[Install]
+WantedBy=timers.target

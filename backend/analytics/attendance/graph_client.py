@@ -55,11 +55,16 @@ class GraphClient:
                    scope=os.environ.get("MICROSOFT_GRAPH_SCOPE", SCOPE),
                    base_url=os.environ.get("MICROSOFT_GRAPH_BASE_URL", BASE))
 
-    def _request(self, request, operation):
+    def _request(self, request, operation, *, text=False):
         for attempt in range(4):
             self.requests += 1
             try:
                 with self._opener.open(request, timeout=30) as response:
+                    if text:
+                        content = response.read(32 * 1024 * 1024 + 1)
+                        if len(content) > 32 * 1024 * 1024:
+                            raise GraphError(200, 'TranscriptTooLarge', operation=operation)
+                        return content.decode('utf-8-sig')
                     value = json.load(response)
                 if not isinstance(value, dict):
                     raise GraphError(200, "InvalidResponse", operation=operation)
@@ -115,14 +120,14 @@ class GraphClient:
                 not parsed.path.startswith("/v1.0/") or parsed.fragment):
             raise GraphError(0, "UnsafeGraphURL")
 
-    def get(self, path):
+    def get(self, path, *, text=False):
         url = path if path.startswith("https://") else BASE + "/" + path.lstrip("/")
         self.validate_url(url)
         for attempt in range(2):
             self.authenticate()
-            request = urllib.request.Request(url, headers={"Authorization": "Bearer " + self._token, "Accept": "application/json"})
+            request = urllib.request.Request(url, headers={"Authorization": "Bearer " + self._token, "Accept": "text/vtt" if text else "application/json"})
             try:
-                return self._request(request, "graph_read")
+                return self._request(request, "graph_read", text=True) if text else self._request(request, "graph_read")
             except GraphError as exc:
                 if exc.status != 401 or attempt:
                     raise

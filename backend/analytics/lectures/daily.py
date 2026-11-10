@@ -6,7 +6,7 @@ from copy import deepcopy
 def combine_days(prepared):
     buckets = defaultdict(list)
     for key, item in prepared.items():
-        course_id = item["course"].pk if item["course"] else None
+        course_id = item["course"].source_id if item["course"] else None
         # Undated evidence cannot establish a common calendar day.
         bucket = (course_id, item["day"]) if item["day"] else ("undated", key)
         buckets[bucket].append(key)

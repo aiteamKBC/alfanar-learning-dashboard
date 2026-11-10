@@ -14,8 +14,10 @@ from zoneinfo import ZoneInfo
 
 from django.db import transaction
 
-from ..models import Course, LectureCapture, LectureLearner, LectureResource
-from .library import registry
+from ..models import Course
+from lecture_library.models import LectureCapture, LectureLearner, LectureResource
+from config.database_router import LIBRARY_ALIAS
+from .library import registry, require_database
 from .daily import attendance_timing, combine_days
 
 SUBJECTS = {
@@ -95,7 +97,7 @@ def media_window_target(asset, course, prepared):
     duration = (end - start).total_seconds()
     matches = []
     for key, lecture in prepared.items():
-        if lecture["course"] is None or lecture["course"].pk != course.pk or lecture["label"] == "Recording session":
+        if lecture["course"] is None or lecture["course"].source_id != course.source_id or lecture["label"] == "Recording session":
             continue
         anchors = []
         for observation in lecture["observations"].values():
@@ -113,12 +115,14 @@ def media_window_target(asset, course, prepared):
     return matches[0] if len(matches) == 1 else None
 
 
-def import_source(path, speaker_bindings=None):
+def import_source(path, speaker_bindings=None, *, incremental_since=None, subject_courses=None, dry_run=False):
+    require_database()
     source = json.loads(Path(path).read_text(encoding="utf-8"))
     digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
     learners, emails, enrolled = registry()
     by_source = {x.source_id: x for x in learners.values()}
-    courses = {x.source_id: x for x in Course.objects.all()}
+    courses = {x.source_id: x for x in Course.objects.using('default').all()}
+    subjects = {**SUBJECTS, **(subject_courses or {})}
     tables = source_tables(source)
     historical_learners = {str(x["LearnerID"]): x for x in tables.get("AT_Learners", [])}
     prepared, archived_dates = {}, defaultdict(list)
@@ -135,17 +139,17 @@ def import_source(path, speaker_bindings=None):
             "reports": set(), "observations": {}, "resources": {}, "folder": "",
         }
         if day:
-            archived_dates[(course.pk, day)].append(key)
+            archived_dates[(course.source_id, day)].append(key)
 
     for row in tables.get("AT_Attendance", []):
         lecture = prepared.get(row.get("LectureID"))
         identity = historical_learners.get(str(row.get("LearnerID")), {})
         email = str(identity.get("RegisteredEmail") or "").strip().casefold()
         learner = by_source.get(int(row["LearnerID"]))
-        if not lecture or not learner or emails.get(email) != learner.pk or learner.pk not in enrolled[lecture["course"].pk]:
+        if not lecture or not learner or emails.get(email) != learner.source_id or learner.source_id not in enrolled[lecture["course"].source_id]:
             continue
         duration = row.get("DurationSeconds")
-        lecture["observations"][learner.pk] = {
+        lecture["observations"][learner.source_id] = {
             "source_emails": {email}, "identity_ids": set(), "intervals": [],
             "attendance": {"Present": "present", "Absent": "absent", "Review": "review"}.get(row.get("EffectiveStatus"), "not_available"),
             "first_join": timestamp(row.get("FirstJoinUTC")), "last_leave": timestamp(row.get("LastLeaveUTC")),
@@ -161,7 +165,7 @@ def import_source(path, speaker_bindings=None):
     reports = source.get("previous", {}).get("attendance", {}).get("reports", []) + source.get("extra_reports", [])
     incomplete = 0
     for report in reports:
-        course = courses.get(SUBJECTS.get(report.get("subject")))
+        course = courses.get(subjects.get(report.get("subject")))
         if not course:
             continue
         start, end = timestamp(report.get("start")), timestamp(report.get("end"))
@@ -174,7 +178,7 @@ def import_source(path, speaker_bindings=None):
         if records is None or expected is not None and len(records) != expected:
             incomplete += 1
             continue
-        group_key = (course.pk, mid, start, end)
+        group_key = (course.source_id, mid, start, end)
         group = groups.setdefault(group_key, {"course": course, "start": start, "end": end, "mid": mid, "reports": set(), "observations": {}, "speaker_labels": defaultdict(set)})
         group["reports"].add(rid)
         report_groups[(mid, rid)] = group_key
@@ -186,9 +190,9 @@ def import_source(path, speaker_bindings=None):
                 # Include outsiders in ambiguity detection, even though they can
                 # never become learner rows or receive displayed speaking time.
                 identity = record.get("identity", {}).get("id") or email or record["id"]
-                candidate = ("learner", lid) if lid in enrolled[course.pk] else ("external", identity)
+                candidate = ("learner", lid) if lid in enrolled[course.source_id] else ("external", identity)
                 group["speaker_labels"][label].add(candidate)
-            if lid not in enrolled[course.pk]:
+            if lid not in enrolled[course.source_id]:
                 continue
             observation = group["observations"].setdefault(lid, {
                 "source_emails": set(), "identity_ids": set(), "intervals": [],
@@ -218,7 +222,7 @@ def import_source(path, speaker_bindings=None):
     for gkey, group in sorted(groups.items(), key=lambda item: (item[1]["start"], item[1]["mid"])):
         day = group["start"].astimezone(CAIRO).date()
         candidates = []
-        for key in archived_dates[(group["course"].pk, day)]:
+        for key in archived_dates[(group["course"].source_id, day)]:
             old = prepared[key]["observations"]
             if any(
                 lid in old and old[lid]["first_join"] and old[lid]["last_leave"]
@@ -262,7 +266,7 @@ def import_source(path, speaker_bindings=None):
     media_window_links = 0
     contents = source.get("transcript_contents", {})
     for series in source.get("series", []):
-        course = courses.get(SUBJECTS.get(series.get("subject")))
+        course = courses.get(subjects.get(series.get("subject")))
         # Explicit project archive title; its module is deliberately unresolved.
         project_archive = series.get("subject") == "PCP Alfanar Group"
         if not course and not project_archive:
@@ -389,11 +393,33 @@ def import_source(path, speaker_bindings=None):
                     verified_intervals[key].append(interval)
                     speech_emails[key].update(lecture["observations"][matched[0]]["source_emails"])
 
-    with transaction.atomic():
+    with transaction.atomic(using=LIBRARY_ALIAS):
         saved, observation_count, resource_count = [], 0, 0
         for key, item in prepared.items():
+            speech_key = key
+            existing = None
+            if incremental_since is not None:
+                # Automation is additive from its fixed cutover. Historical,
+                # undated and owner-hidden entries are never reactivated.
+                if not item['day'] or item['day'] < incremental_since or not item['course']:
+                    continue
+                candidates = list(LectureCapture.objects.select_for_update().filter(
+                    course_source_id=item['course'].source_id, session_date=item['day']))
+                if any(not x.active for x in candidates):
+                    continue
+                if len(candidates) > 1:
+                    raise ValueError('Multiple existing daily library entries require review')
+                existing = candidates[0] if candidates else None
+                if existing:
+                    key = existing.source_key
+                # Keep the owner's all-absent-day exclusion, without promoting
+                # a missing report into an explicit negative observation.
+                if not existing and not any(o['attendance'] in {'present', 'review'} or
+                        seconds(o['intervals']) > 0 or (o.get('duration_seconds') or 0) > 0
+                        for o in item['observations'].values()):
+                    continue
             lecture, _ = LectureCapture.objects.update_or_create(source_key=key, defaults={
-                "course": item["course"], "session_date": item["day"], "starts_at": item["starts"],
+                "course_source_id": item["course"].source_id if item["course"] else None, "session_date": item["day"], "starts_at": item["starts"],
                 "ends_at": item["ends"], "source_label": item["label"], "report_ids": sorted(item["reports"]),
                 "recording_folder_url": item["folder"], "source_fingerprint": digest, "active": True,
             })
@@ -410,27 +436,52 @@ def import_source(path, speaker_bindings=None):
                         row["attendance"] = "present"
                     elif intervals and row["attendance"] not in {"present", "absent"}:
                         row["attendance"] = "review"
-                speech = speech_intervals.get((key, lid))
+                speech = speech_intervals.get((speech_key, lid))
                 if speech:
                     duration = seconds(speech)
-                    verified = bool(verified_intervals.get((key, lid))) and abs(seconds(verified_intervals[(key, lid)]) - duration) < 0.000001
+                    verified = bool(verified_intervals.get((speech_key, lid))) and abs(seconds(verified_intervals[(speech_key, lid)]) - duration) < 0.000001
                     row.update(speaking_seconds=duration, speaker_verified=verified,
                                speaking_match="verified_identity" if verified else "meeting_name",
-                               speaking_emails=speech_emails[(key, lid)],
-                               speaking_partial=(key, lid) in partial and not verified)
+                               speaking_emails=speech_emails[(speech_key, lid)],
+                               speaking_partial=(speech_key, lid) in partial and not verified)
                 for field in ("source_emails", "identity_ids", "speaking_emails"):
                     row[field] = sorted(row[field])
-                LectureLearner.objects.update_or_create(lecture=lecture, learner_id=lid, defaults=row)
+                if incremental_since is not None:
+                    old = lecture.observations.filter(learner_source_id=lid).first()
+                    if old:
+                        for field in ('duration_seconds', 'speaking_seconds'):
+                            if getattr(old, field) is not None and (row[field] is None or row[field] + 0.000001 < getattr(old, field)):
+                                raise ValueError('A library revision would discard verified evidence')
+                        if old.speaker_verified and not row['speaker_verified']:
+                            raise ValueError('A library revision would downgrade speaker evidence')
+                        if old.first_join and (not row['first_join'] or row['first_join'] > old.first_join):
+                            raise ValueError('A library revision would shorten the first join')
+                        if old.last_leave and (not row['last_leave'] or row['last_leave'] < old.last_leave):
+                            raise ValueError('A library revision would shorten the last leave')
+                LectureLearner.objects.update_or_create(lecture=lecture, learner_source_id=lid, defaults=row)
                 kept_learners.append(lid)
                 observation_count += 1
-            lecture.observations.exclude(learner_id__in=kept_learners).delete()
+            missing = lecture.observations.exclude(learner_source_id__in=kept_learners)
+            if incremental_since is not None and missing.exists():
+                raise ValueError('A library revision would remove learner evidence')
+            missing.delete()
             kept_resources = []
             for (kind, provider, source_id), values in item["resources"].items():
+                if incremental_since is not None:
+                    old = lecture.resources.filter(provider=provider, kind=kind, source_id=source_id).first()
+                    if old and old.readable and not values['readable']:
+                        raise ValueError('A library revision would remove readable media')
                 asset, _ = LectureResource.objects.update_or_create(lecture=lecture, provider=provider, kind=kind, source_id=source_id, defaults=values)
                 kept_resources.append(asset.pk)
                 resource_count += 1
-            lecture.resources.exclude(pk__in=kept_resources).delete()
-        LectureCapture.objects.exclude(pk__in=saved).update(active=False)
+            missing = lecture.resources.exclude(pk__in=kept_resources)
+            if incremental_since is not None and missing.exists():
+                raise ValueError('A library revision would remove media references')
+            missing.delete()
+        if incremental_since is None:
+            LectureCapture.objects.exclude(pk__in=saved).update(active=False)
+        if dry_run:
+            transaction.set_rollback(True, using=LIBRARY_ALIAS)
     return {"lectures": len(saved), "learner_observations": observation_count, "resources": resource_count,
             "held_report_windows": held, "incomplete_reports": incomplete,
             "media_window_links": media_window_links,

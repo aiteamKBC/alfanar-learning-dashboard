@@ -1,4 +1,20 @@
-# Verified identity-management release - 9 November 2026
+# Production release runbook
+
+## Current release: SQLite dashboard + PostgreSQL Lecture Library
+
+For the database-isolation release, use the complete [safe deployment procedure](postgresql-storage.md).
+Executive Overview, Learners, identities, authentication, LMS sync, historical
+attendance and Teams automation remain on the existing `backend/db.sqlite3`.
+Only the new independent Lecture Library uses PostgreSQL. The horizontal-scroll
+fix from `da16011` is included. Do not run the former whole-database transfer.
+
+The procedure uses the actual `/var/www/alfanar-learning-dashboard` installation,
+`backend/venv/bin/python`, `backend/.env`, and `alfanar-gunicorn.service`; it includes
+backup, explicit database configuration, separate migration checks, unchanged-row
+verification and rollback. No historical attendance import or identity restoration
+is required for this release. Do not repeat the historical procedures below.
+
+## Historical verified identity-management release - 9 November 2026
 
 This is the authoritative deployment runbook for the identity-restoration release.
 It supersedes the former consolidated identity baseline. These are instructions for
