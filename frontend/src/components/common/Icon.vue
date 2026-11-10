@@ -3,6 +3,10 @@
 const props = withDefaults(defineProps<{ name: string; size?: number; stroke?: number }>(), { size: 18, stroke: 1.8 })
 
 const PATHS: Record<string, string> = {
+  calendar: 'M4 5h16v16H4zM8 3v4M16 3v4M4 10h16M8 14h2M14 14h2M8 18h2',
+  play: 'm9 5 11 7-11 7V5Z',
+  download: 'M12 3v12M7 10l5 5 5-5M4 17v4h16v-4',
+  external: 'M14 3h7v7M21 3l-9 9M10 4H4v16h16v-6',
   users: 'M16 19v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 17.5V19M10 10.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6M20 19v-1.5a3.5 3.5 0 0 0-2.5-3.35M15.5 4.6a3 3 0 0 1 0 5.8',
   layers: 'M12 3 3 8l9 5 9-5-9-5ZM3 13l9 5 9-5M3 17.5l9 5 9-5',
   pulse: 'M3 12h4l2.5-6 5 12L17 12h4',

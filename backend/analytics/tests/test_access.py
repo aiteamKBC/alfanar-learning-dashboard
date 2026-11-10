@@ -6,6 +6,7 @@ from unittest import mock
 from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
 
@@ -20,6 +21,10 @@ def provision(*args, password=PW):
 
 
 class DashboardUserTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
     def login(self, username):
         return self.client.post("/api/auth/login", {"username": username, "password": PW},
                                 content_type="application/json")

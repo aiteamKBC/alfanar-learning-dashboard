@@ -7,6 +7,7 @@ from unittest import mock
 from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.core.cache import cache
 from django.test import TestCase
 
 from analytics.models import DashboardAccess
@@ -16,6 +17,8 @@ PW = "Synthetic-Owner-Pass-7319!"  # test-only value
 
 class ProvisionOwnerTests(TestCase):
     def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
         self.dir = tempfile.TemporaryDirectory()
         self.env = Path(self.dir.name) / ".env"
 

@@ -8,6 +8,7 @@ const model = defineModel<string>({ default: '' })
     <span class="eyebrow">{{ label }}</span>
     <select
       v-model="model"
+      :aria-label="label"
       class="focus-ring h-9 w-full rounded-md sm:w-auto sm:min-w-44 sm:max-w-72 border border-line bg-white px-2.5 pr-8 text-sm text-ink hover:border-gray-300"
     >
       <option value="">{{ allLabel ?? 'All' }}</option>

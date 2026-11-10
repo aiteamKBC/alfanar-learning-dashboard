@@ -14,6 +14,7 @@ watch(() => route.fullPath, () => { mobileOpen.value = false })
 const nav = [
   { to: '/', label: 'Executive Overview', key: 'overview' },
   { to: '/learners', label: 'Learners', key: 'learners' },
+  { to: '/lectures', label: 'Lectures', key: 'lectures' },
 ]
 const initials = computed(() => (session.user?.name ?? '?').replace(/[^A-Za-z ]/g, ' ').trim().split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase() || 'U')
 

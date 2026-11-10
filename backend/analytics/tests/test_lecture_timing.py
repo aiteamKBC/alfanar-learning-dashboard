@@ -31,7 +31,8 @@ REPORTS = [(s, "2026-01-05T08:55:00Z" if rid == "R1" else a, b, rid, mid)
 def without_attendance(value):
     """The reconciliation feature may change attendance, never the LMS payload."""
     if isinstance(value, dict):
-        return {k: without_attendance(v) for k, v in value.items() if k != "attendance"}
+        return {k: without_attendance(v) for k, v in value.items()
+                if k not in {"attendance", "verified_attendance_seconds"}}
     if isinstance(value, (list, tuple)):
         return [without_attendance(v) for v in value]
     return value
