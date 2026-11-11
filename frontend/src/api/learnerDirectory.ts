@@ -49,11 +49,12 @@ export function directoryCsv(rows: LearnerRow[]) {
     .map(cells => cells.map(csvCell).join(',')).join('\r\n') + '\r\n'
 }
 
-export interface DirectoryExportFilters { search?: string; engagement?: string; ordering?: string }
+export interface DirectoryExportFilters { course?: string; search?: string; engagement?: string; ordering?: string }
 
 export async function downloadDirectory(filters: DirectoryExportFilters, request: typeof fetch = fetch) {
-  // Deliberately omit course and the screen's page: exports always use All Modules.
+  // Use the table's filters, but fetch every matching page for the download.
   const params = new URLSearchParams({ ordering: filters.ordering || 'name', page_size: '100' })
+  if (filters.course) params.set('course', filters.course)
   if (filters.search?.trim()) params.set('search', filters.search.trim())
   if (filters.engagement) params.set('engagement', filters.engagement)
   const rows: LearnerRow[] = []

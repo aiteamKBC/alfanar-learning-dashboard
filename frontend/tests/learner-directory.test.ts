@@ -117,14 +117,14 @@ test('assignment ratios stay text in Excel without formulas or visible apostroph
   assert.equal(parseCsv(directoryCsv([row]))[1]?.[8], '1\u00a0/\u00a03')
 })
 
-test('one download fetches every page with search/status/order, always using All Modules', async () => {
+test('one download fetches every page with the selected course, search, status and ordering', async () => {
   const calls: string[] = []
   const filters = { search: '  Synthetic  ', engagement: 'active', ordering: '-progress', course: '154268', page: 2 }
   const request = (async (path, init) => {
     calls.push(String(path))
     const url = new URL(String(path), 'http://localhost')
     assert.equal(url.pathname, '/api/learners')
-    assert.equal(url.searchParams.has('course'), false)
+    assert.equal(url.searchParams.get('course'), '154268')
     assert.equal(url.searchParams.get('search'), 'Synthetic')
     assert.equal(url.searchParams.get('engagement'), 'active')
     assert.equal(url.searchParams.get('ordering'), '-progress')
@@ -143,11 +143,51 @@ test('one download fetches every page with search/status/order, always using All
   assert.equal(parsed[137]?.[0], 'Synthetic learner ID 137')
 })
 
+for (const [course, title] of [
+  ['', ''],
+  ['83334', 'Planning, Controlling and Leading a Project'],
+  ['121642', 'Procurement Risk and Contract Management'],
+  ['135945', 'Operations and Information Management for Project Managers'],
+  ['154268', 'Advanced Project and Logistics Management'],
+] as const) {
+  test(`export preserves the API's displayed scope and values for ${course || 'All Modules'}`, async () => {
+    const row = learner()
+    if (course) {
+      // Deliberately different from the all-module fixture: the API owns all metrics.
+      Object.assign(row, {
+        enrollments: [{ course_id: Number(course), course: title, progress_pct: 12.5 }],
+        mean_progress: 12.5, attendance: { available: true, pct: 50, attended: 7, expected: 14 },
+        verified_attendance_seconds: 3601, lessons_completed: 1, lessons_known: 8, lessons_completion_pct: 12.5,
+        quizzes_attempted: 1, quizzes_known: 4, quiz_completion_pct: 25,
+        mean_latest_score: 80, quizzes_passed_latest: 1, quizzes_graded: 1,
+        assignments_submitted: 0, assignments_known: 0, last_activity: null,
+      })
+    }
+    const result = await downloadDirectory({ course, search: ' Synthetic ', engagement: 'active', ordering: '-attendance' },
+      (async path => {
+        const params = new URL(String(path), 'http://localhost').searchParams
+        assert.equal(params.get('course'), course || null)
+        assert.equal(params.get('search'), 'Synthetic')
+        assert.equal(params.get('engagement'), 'active')
+        assert.equal(params.get('ordering'), '-attendance')
+        return Response.json({ count: 1, pages: 1, page: 1, results: [row] })
+      }) as typeof fetch)
+    const parsed = parseCsv(await result.blob.text())
+    assert.equal(parsed.length, 2)
+    assert.deepEqual(parsed[0], directoryCsvHeaders)
+    assert.deepEqual(parsed[1]?.map(value => value.replaceAll('\u00a0', ' ')), course ? [
+      'Synthetic learner ID 1', title, '12.5%', '50% 7 / 14 lectures', '1h 0m',
+      '1 / 8 (12.5%)', '1 / 4 (25%)', '80% 1 / 1 passed', 'N/A', 'No recorded activity',
+    ] : directoryCsvCells(row))
+  })
+}
+
 test('all 37 learners are exported in one request, while an empty filter result is header-only', async () => {
   for (const count of [37, 0]) {
     let calls = 0
-    const result = await downloadDirectory({}, (async () => {
+    const result = await downloadDirectory({}, (async path => {
       calls++
+      assert.equal(new URL(String(path), 'http://localhost').searchParams.has('course'), false)
       return Response.json({ count, pages: 1, page: 1, results: Array.from({ length: count }, (_, i) => learner(i + 1)) })
     }) as typeof fetch)
     assert.equal(calls, 1)
