@@ -6,25 +6,32 @@ export function completionLabel(completed: number, known: number | null | undefi
   return `${num(completed)} / ${num(known)} (${pct(percentage)})`
 }
 
-// Same columns as LearnerTable: name and ID share its first cell.
+// Keep LearnerTable's metric order, with combined values in adjacent CSV cells.
 export const directoryCsvHeaders = [
-  'Learner', 'Enrolled modules', 'Mean LMS progress', 'Attendance evidence',
-  'Total attendance hours', 'Materials completed', 'Quizzes attempted', 'Average Quiz Score', 'Assignments', 'Last activity',
+  'Learner', 'Enrolled modules', 'Mean LMS progress', 'Attendance Count', 'Attendance Percentage',
+  'Total attendance hours', 'Materials completed', 'Materials Completion (%)',
+  'Quizzes attempted', 'Quiz Completion (%)', 'Average Quiz Score', 'Quizzes Passed / Graded',
+  'Assignments', 'Last activity',
 ] as const
+
+function completionCsvCells(completed: number, known: number | null | undefined, percentage: number | null | undefined) {
+  // Preserve completionLabel's availability rules and formatting without recalculating.
+  if (!known || percentage === null || percentage === undefined) return ['N/A', 'N/A']
+  return [`${num(completed)} / ${num(known)}`, pct(percentage)]
+}
 
 export function directoryCsvCells(row: LearnerRow): string[] {
   return [
     `${row.name} ID ${row.learner_id}`,
     row.enrollments.map(enrollment => enrollment.course).join(' | '),
     pct(row.mean_progress),
-    row.attendance.available
-      ? `${pct(row.attendance.pct)} ${row.attendance.attended} / ${row.attendance.expected} lectures`
-      : 'N/A',
+    row.attendance.available ? `${row.attendance.attended} / ${row.attendance.expected}` : 'N/A',
+    row.attendance.available ? pct(row.attendance.pct) : 'N/A',
     attendanceHours(row.verified_attendance_seconds),
-    completionLabel(row.lessons_completed, row.lessons_known, row.lessons_completion_pct),
-    completionLabel(row.quizzes_attempted, row.quizzes_known, row.quiz_completion_pct),
-    (row.mean_latest_score === null ? 'N/A' : pct(row.mean_latest_score)) +
-      (row.quizzes_graded ? ` ${row.quizzes_passed_latest} / ${row.quizzes_graded} passed` : ''),
+    ...completionCsvCells(row.lessons_completed, row.lessons_known, row.lessons_completion_pct),
+    ...completionCsvCells(row.quizzes_attempted, row.quizzes_known, row.quiz_completion_pct),
+    row.mean_latest_score === null ? 'N/A' : pct(row.mean_latest_score),
+    row.quizzes_graded ? `${row.quizzes_passed_latest} / ${row.quizzes_graded}` : 'N/A',
     row.assignments_known ? `${row.assignments_submitted} / ${row.assignments_known}` : 'N/A',
     row.last_activity ? dateTime(row.last_activity, false) : 'No recorded activity',
   ]
@@ -37,8 +44,8 @@ function csvCell(value: string) {
   const unsafe = /^[\t\r\n]/.test(value) || /^[=+\-@]/.test(value.trimStart())
   const singleLine = value.replace(/[ \t]*[\r\n\u2028\u2029]+[ \t]*/g, ' ')
   // Excel parses a bare "1 / 3" as a date even inside CSV quotes. Visually
-  // identical nonbreaking spaces keep displayed assignment ratios as text.
-  const text = /^\d+ \/ \d+$/.test(singleLine) ? singleLine.replaceAll(' ', '\u00a0') : singleLine
+  // identical nonbreaking spaces keep all exported count ratios as text.
+  const text = /^[\d,]+ \/ [\d,]+$/.test(singleLine) ? singleLine.replaceAll(' ', '\u00a0') : singleLine
   // CSV quoting does not prevent Excel formula execution in untrusted names.
   const literal = unsafe ? `'${text}` : text
   return `"${literal.replace(/"/g, '""')}"`
