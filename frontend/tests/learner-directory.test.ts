@@ -36,13 +36,20 @@ function parseCsv(csv: string): string[][] {
   return rows
 }
 
-test('CSV retains the table column order, IDs, full module names and every displayed metric', () => {
+test('CSV splits combined metrics into adjacent columns in the unchanged table metric order', () => {
   const table = readFileSync(new URL('../src/components/learners/LearnerTable.vue', import.meta.url), 'utf8')
-  assert.deepEqual(directoryCsvHeaders, [...table.matchAll(/label: '([^']+)'/g)].map(m => m[1]))
+  const expanded: Record<string, string[]> = {
+    'Attendance evidence': ['Attendance Count', 'Attendance Percentage'],
+    'Materials completed': ['Materials completed', 'Materials Completion (%)'],
+    'Quizzes attempted': ['Quizzes attempted', 'Quiz Completion (%)'],
+    'Average Quiz Score': ['Average Quiz Score', 'Quizzes Passed / Graded'],
+  }
+  assert.deepEqual(directoryCsvHeaders, [...table.matchAll(/label: '([^']+)'/g)].flatMap(m => expanded[m[1]!] ?? [m[1]]))
+  assert.equal(directoryCsvHeaders.length, 14)
   assert.deepEqual(directoryCsvCells(learner()), [
     'Synthetic learner ID 1', 'Planning, Controlling and Leading a Project | Advanced Project and Logistics Management',
-    '38.7%', '75% 3 / 4 lectures', '2h 54m',
-    '35 / 130 (26.9%)', '2 / 4 (50%)', '95.2% 1 / 2 passed', '0 / 2', '31 Dec 2029',
+    '38.7%', '3 / 4', '75%', '2h 54m',
+    '35 / 130', '26.9%', '2 / 4', '50%', '95.2%', '1 / 2', '0 / 2', '31 Dec 2029',
   ])
 })
 
@@ -55,10 +62,10 @@ test('missing data remains distinct from known zero activity and zero measured d
     mean_latest_score: null, quizzes_graded: 0, assignments_known: 0,
     verified_attendance_seconds: null, last_activity: null,
   })
-  assert.deepEqual(directoryCsvCells(missing).slice(2), ['—', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'No recorded activity'])
+  assert.deepEqual(directoryCsvCells(missing).slice(2), ['—', ...Array(10).fill('N/A'), 'No recorded activity'])
   Object.assign(missing, { lessons_known: 10, lessons_completion_pct: 0, quizzes_known: 4, quiz_completion_pct: 0,
     mean_latest_score: 0, quizzes_graded: 1, quizzes_passed_latest: 0, assignments_known: 2, verified_attendance_seconds: 0 })
-  assert.deepEqual(directoryCsvCells(missing).slice(4, 9), ['0h 0m', '0 / 10 (0%)', '0 / 4 (0%)', '0% 0 / 1 passed', '0 / 2'])
+  assert.deepEqual(directoryCsvCells(missing).slice(5, 13), ['0h 0m', '0 / 10', '0%', '0 / 4', '0%', '0%', '0 / 1', '0 / 2'])
   assert.equal(attendanceHours(45), '<1m')
 })
 
@@ -107,14 +114,42 @@ test('official attendance counts and percentage pass through from the API withou
   for (const [attended, expected, percentage] of [[47, 58, 81], [0, 16, 0], [10, 30, 33.3], [38, 58, 65.5]]) {
     const row = learner()
     Object.assign(row.attendance, { attended, expected, pct: percentage })
-    assert.equal(parseCsv(directoryCsv([row]))[1]?.[3], `${percentage}% ${attended} / ${expected} lectures`)
+    const cells = parseCsv(directoryCsv([row]))[1]!
+    assert.equal(cells[3]?.replaceAll('\u00a0', ' '), `${attended} / ${expected}`)
+    assert.equal(cells[4], `${percentage}%`)
   }
 })
 
-test('assignment ratios stay text in Excel without formulas or visible apostrophes', () => {
+test('all count ratios stay text in Excel without formulas or visible apostrophes', () => {
   const row = learner(); row.assignments_submitted = 1; row.assignments_known = 3
-  assert.equal(directoryCsvCells(row)[8], '1 / 3')
-  assert.equal(parseCsv(directoryCsv([row]))[1]?.[8], '1\u00a0/\u00a03')
+  row.lessons_completed = 1000; row.lessons_known = 1250; row.lessons_completion_pct = 80
+  assert.equal(directoryCsvCells(row)[12], '1 / 3')
+  const parsed = parseCsv(directoryCsv([row]))[1]!
+  for (const index of [3, 6, 8, 11, 12]) {
+    assert.equal(parsed[index], directoryCsvCells(row)[index]!.replaceAll(' ', '\u00a0'))
+  }
+  assert.equal(parsed[6], '1,000\u00a0/\u00a01,250')
+})
+
+test('split completion cells retain the table availability gate and existing numeric precision', () => {
+  const row = learner()
+  for (const [known, percentage] of [[null, null], [0, 0], [97, null], [97, undefined], [97, 96.94]] as const) {
+    Object.assign(row, { lessons_completed: 94, lessons_known: known, lessons_completion_pct: percentage,
+      quizzes_attempted: 94, quizzes_known: known, quiz_completion_pct: percentage })
+    const cells = directoryCsvCells(row)
+    const label = completionLabel(94, known, percentage)
+    for (const index of [6, 8]) {
+      assert.equal(cells[index + 1] === 'N/A' ? cells[index] : `${cells[index]} (${cells[index + 1]})`, label)
+    }
+  }
+  assert.deepEqual(directoryCsvCells(row).slice(6, 10), ['94 / 97', '96.9%', '94 / 97', '96.9%'])
+})
+
+test('missing quiz score does not discard a displayed passed/graded count', () => {
+  const row = learner(); row.mean_latest_score = null
+  assert.deepEqual(directoryCsvCells(row).slice(10, 12), ['N/A', '1 / 2'])
+  row.quizzes_graded = 0
+  assert.deepEqual(directoryCsvCells(row).slice(10, 12), ['N/A', 'N/A'])
 })
 
 test('one download fetches every page with the selected course, search, status and ordering', async () => {
@@ -176,8 +211,8 @@ for (const [course, title] of [
     assert.equal(parsed.length, 2)
     assert.deepEqual(parsed[0], directoryCsvHeaders)
     assert.deepEqual(parsed[1]?.map(value => value.replaceAll('\u00a0', ' ')), course ? [
-      'Synthetic learner ID 1', title, '12.5%', '50% 7 / 14 lectures', '1h 0m',
-      '1 / 8 (12.5%)', '1 / 4 (25%)', '80% 1 / 1 passed', 'N/A', 'No recorded activity',
+      'Synthetic learner ID 1', title, '12.5%', '7 / 14', '50%', '1h 0m',
+      '1 / 8', '12.5%', '1 / 4', '25%', '80%', '1 / 1', 'N/A', 'No recorded activity',
     ] : directoryCsvCells(row))
   })
 }
