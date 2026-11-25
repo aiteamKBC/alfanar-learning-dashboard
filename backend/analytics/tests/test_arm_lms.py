@@ -1,6 +1,8 @@
 """Advanced Research Methods: live LMS read path, using a synthetic snapshot (never the real LMS)."""
 
 import datetime as dt
+import io
+import json
 from unittest import mock
 
 from django.test import override_settings
@@ -258,6 +260,130 @@ class ArmTests(ApiTestBase):
         self.assertIn(lecture['id'], [r['id'] for r in self.get('/api/lectures')['results']])
 
     # --- read-only guarantees -----------------------------------------------------------
+
+    def media_snapshot(self):
+        value = snapshot()
+        value.artifacts = [
+            {'id': 'ART-VIDEO', 'occurrence_id': COMPLETED, 'artifact_type': 'recording',
+             'graph_artifact_id': 'graph-recording', 'meeting_id': 'artifact-meeting-not-series',
+             'organizer_id': '11111111-1111-4111-8111-111111111111',
+             'created_datetime': dt.datetime(2026, 11, 23, 10)},
+            {'id': 'ART-TEXT', 'occurrence_id': COMPLETED, 'artifact_type': 'transcript',
+             'graph_artifact_id': 'graph-transcript', 'meeting_id': 'artifact-meeting-not-series',
+             'organizer_id': '11111111-1111-4111-8111-111111111111',
+             'created_datetime': dt.datetime(2026, 11, 23, 10)},
+        ]
+        return value
+
+    def test_lms_media_references_appear_in_detail_and_all_module_counts(self):
+        from analytics.arm import Arm
+        lecture_id = Arm.lecture_id(COMPLETED)
+        before = self.get(f'/api/lectures/{lecture_id}')['participants']
+        with mock.patch('analytics.api.views.load_snapshot', side_effect=self.media_snapshot):
+            detail = self.get(f'/api/lectures/{lecture_id}')
+            self.assertEqual(detail['participants'], before)
+            self.assertEqual((detail['recordings'], detail['transcripts']), (1, 1))
+            self.assertEqual({r['kind'] for r in detail['resources']}, {'recording', 'transcript'})
+            self.assertEqual(self.get(f'/api/lectures?course={ARM_COURSE_ID}')['total_recordings'], 1)
+            self.assertEqual(self.get('/api/lectures')['total_recordings'],
+                             self.without_lms('/api/lectures')['total_recordings'] + 1)
+            public = json.dumps(detail)
+            for private in ('artifact-meeting-not-series', 'graph-recording', 'graph-transcript', '11111111-1111'):
+                self.assertNotIn(private, public)
+            for asset in detail['resources']:
+                self.assertLess(asset['id'], 2**53)
+                self.assertTrue(asset['url'].startswith(f'/api/lectures/{lecture_id}/resources/'))
+
+    def test_lms_recording_uses_artifact_meeting_and_existing_range_proxy(self):
+        from analytics.arm import Arm
+        value = self.media_snapshot()
+        with mock.patch('analytics.api.views.load_snapshot', return_value=value):
+            detail = self.get('/api/lectures/' + Arm.lecture_id(COMPLETED))
+            asset = next(a for a in detail['resources'] if a['kind'] == 'recording')
+            upstream = io.BytesIO(b'x')
+            upstream.status, upstream.headers = 206, {'Content-Length': '1', 'Content-Range': 'bytes 0-0/10'}
+            with mock.patch('analytics.lectures.media.open_recording', return_value=upstream) as opened:
+                response = self.client.get(asset['url'], HTTP_RANGE='bytes=0-0')
+                self.assertEqual(response.status_code, 206)
+                self.assertEqual(b''.join(response.streaming_content), b'x')
+                stub, byte_range = opened.call_args.args
+                self.assertEqual(stub.meeting_id, 'artifact-meeting-not-series')
+                self.assertEqual(stub.source_id, 'graph-recording')
+                self.assertEqual(byte_range, 'bytes=0-0')
+
+    def test_lms_transcript_uses_existing_metadata_parser_for_text_and_vtt(self):
+        from analytics.arm import Arm
+        cue = {'speakerName': 'Speaker', 'spokenText': 'Source transcript',
+               'startDateTime': '2026-11-23T10:00:00Z', 'endDateTime': '2026-11-23T10:00:03Z'}
+        metadata = 'WEBVTT\n\n00:00:00.000 --> 00:00:03.000\n' + json.dumps(cue)
+        with mock.patch('analytics.api.views.load_snapshot', side_effect=self.media_snapshot), \
+                mock.patch('analytics.lectures.lms_media.GraphClient.from_environment') as graph:
+            graph.return_value.get.return_value = metadata
+            detail = self.get('/api/lectures/' + Arm.lecture_id(COMPLETED))
+            asset = next(a for a in detail['resources'] if a['kind'] == 'transcript')
+            response = self.client.get(asset['url'])
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('Source transcript', response.content.decode())
+            self.assertEqual(response['Cache-Control'], 'private, no-store')
+            response = self.client.get(asset['url'] + '?format=vtt')
+            self.assertEqual(response.status_code, 200, response.content)
+            self.assertTrue(response.content.decode().startswith('WEBVTT'))
+            path = graph.return_value.get.call_args.args[0]
+            self.assertIn('/onlineMeetings/artifact-meeting-not-series/', path)
+            self.assertIn('/transcripts/graph-transcript/metadataContent', path)
+
+    def test_lms_artifacts_do_not_cross_occurrences_or_expose_invalid_bindings(self):
+        from analytics.arm import Arm
+        from analytics.lectures.lms_media import resource_id
+        value = self.media_snapshot()
+        value.artifacts[0]['occurrence_id'] = SCHEDULED
+        value.artifacts[1]['organizer_id'] = None
+        with mock.patch('analytics.api.views.load_snapshot', return_value=value), \
+                mock.patch('analytics.lectures.media.open_recording') as opened:
+            lecture_id = Arm.lecture_id(COMPLETED)
+            self.assertEqual(self.get('/api/lectures/' + lecture_id)['resources'], [])
+            self.assertEqual(self.client.get(f'/api/lectures/{lecture_id}/resources/{resource_id("ART-VIDEO")}').status_code, 404)
+            opened.assert_not_called()
+
+    def test_lms_media_routes_require_authentication(self):
+        from analytics.arm import Arm
+        from analytics.lectures.lms_media import resource_id
+        self.client.logout()
+        with mock.patch('analytics.api.views.load_snapshot') as loaded:
+            response = self.client.get(f'/api/lectures/{Arm.lecture_id(COMPLETED)}/resources/{resource_id("ART-VIDEO")}')
+            self.assertIn(response.status_code, (401, 403))
+            loaded.assert_not_called()
+
+    def test_lms_media_reads_never_persist_data(self):
+        from analytics.arm import Arm
+        from lecture_library.models import LectureCapture, LectureLearner, LectureResource
+        models = (Learner, Enrollment, SessionAttendance, LectureCapture, LectureLearner, LectureResource)
+        before = [m.objects.count() for m in models]
+        with mock.patch('analytics.api.views.load_snapshot', side_effect=self.media_snapshot):
+            self.get('/api/lectures/' + Arm.lecture_id(COMPLETED))
+        self.assertEqual([m.objects.count() for m in models], before)
+
+    def test_unavailable_lms_transcript_returns_safe_error_without_affecting_attendance(self):
+        from analytics.arm import Arm
+        from analytics.attendance.graph_client import GraphError
+        with mock.patch('analytics.api.views.load_snapshot', side_effect=self.media_snapshot), \
+                mock.patch('analytics.lectures.lms_media.GraphClient.from_environment') as graph:
+            graph.return_value.get.side_effect = GraphError(404, 'NotFound')
+            url = '/api/lectures/' + Arm.lecture_id(COMPLETED)
+            detail = self.get(url)
+            asset = next(a for a in detail['resources'] if a['kind'] == 'transcript')
+            response = self.client.get(asset['url'])
+            self.assertEqual(response.status_code, 502)
+            self.assertNotIn('graph-transcript', response.content.decode())
+            self.assertEqual(self.get(url)['participants'], detail['participants'])
+
+    def test_hidden_media_query_is_module_scoped_and_filters_lms_hidden_flag(self):
+        sql = lms_live.QUERIES['artifacts']
+        self.assertIn('ls.module_catalogue_id = %(module)s', sql)
+        self.assertIn("o.status = 'completed'", sql)
+        self.assertIn("lmsHiddenFromLearners", sql)
+        self.assertIn("<> 'true'", sql)
+        self.assertNotIn('a.metadata,', sql)
 
     def test_no_dashboard_records_are_written(self):
         counts = lambda: [m.objects.count() for m in (Learner, Enrollment, LessonRecord, SessionAttendance)]  # noqa: E731

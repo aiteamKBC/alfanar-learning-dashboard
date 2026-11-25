@@ -92,5 +92,18 @@ Readable source transcripts download as text or VTT under the same dashboard acc
 rules. Full source media can include the meeting's other participants; they do not
 become directory rows or receive inferred learner identities.
 
+Advanced Research Methods remains a live, read-only LMS view. Its completed
+occurrences read their visible recording/transcript references from
+`curriculum.live_session_artifacts`, scoped to that module and occurrence. Media
+uses the exact meeting and organizer in each artifact's metadata; a recurring
+series ID is not interchangeable with the recorded meeting ID. Downloads and
+range-aware playback use the existing authenticated proxy. Transcripts use the
+same metadata-to-text/VTT parser, with no Graph URLs or credentials in the browser.
+No LMS or dashboard/library rows are created, copied, changed or cached. Missing
+or hidden artifact bindings remain unavailable. New LMS artifacts appear on the
+next page read without adding this module to the four-course discovery policy.
+LMS attendance statuses/durations and the current speaking-time projection stay
+unchanged; this media connection does not infer learner speech from labels.
+
 Validation: `python backend/manage.py test analytics.tests.test_lecture_library`
 and `npm --prefix frontend run build`.
