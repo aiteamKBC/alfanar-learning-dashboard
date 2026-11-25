@@ -13,6 +13,7 @@ import datetime as dt
 import uuid
 from collections import Counter, defaultdict
 from zoneinfo import ZoneInfo
+from django.utils import timezone
 
 from . import lms_live
 from .course_labels import course_order_key
@@ -29,6 +30,9 @@ SESSION_ZONES = {'GMT Standard Time': 'Europe/London', 'UTC': 'UTC', 'Coordinate
                  'Egypt Standard Time': 'Africa/Cairo', 'Arabian Standard Time': 'Asia/Dubai',
                  'Arab Standard Time': 'Asia/Riyadh'}
 KNOWN_STATUSES = {'present', 'absent'}
+# LMS "completed" can refer to a short report fragment while a lecture is live.
+# Keep the existing two-hour post-meeting evidence delay for this read-only view.
+ATTENDANCE_PUBLICATION_DELAY = dt.timedelta(hours=2)
 # The LMS stores no module progress percentage for this module. Approved display fallback for
 # enrolled learners in ARM views only; it is not an LMS value and is never written anywhere.
 # Cross-module averages exclude it (see `rollup`).
@@ -36,9 +40,10 @@ PROGRESS_FALLBACK = 0.0
 
 DEFINITIONS = {
     'attendance': 'Present / recorded LMS attendance observations for completed lectures, using the LMS '
-                  'learner attendance statuses as stored.',
-    'delivered_lectures': 'Lectures with status completed in the LMS live-session schedule.',
-    'delivered_sessions': 'Lectures with status completed in the LMS live-session schedule.',
+                  'learner attendance statuses as stored, after the lecture has ended, the two-hour '
+                  'reporting delay has passed and the LMS attendance has been refreshed after its end.',
+    'delivered_lectures': 'Completed LMS lectures whose end, reporting delay and attendance refresh are confirmed.',
+    'delivered_sessions': 'Completed LMS lectures whose end, reporting delay and attendance refresh are confirmed.',
     'materials_completed': 'Accepted LMS progress entries for the module\'s videos, PDFs, audio and readings.',
 }
 
@@ -64,7 +69,8 @@ class Arm:
     course_id = ARM_COURSE_ID
     title = ARM_TITLE
 
-    def __init__(self, snapshot: lms_live.ArmSnapshot, registry=None):
+    def __init__(self, snapshot: lms_live.ArmSnapshot, registry=None, *, now=None):
+        now = now if now is not None else timezone.now()
         dashboard_learners, emails = registry if registry is not None else _dashboard_registry()
         self.components = []
         for c in snapshot.components:
@@ -103,6 +109,18 @@ class Arm:
             start, end = o['scheduled_start'], o['scheduled_end']
             local_start = start.replace(tzinfo=zone) if start and start.tzinfo is None else start
             local_end = end.replace(tzinfo=zone) if end and end.tzinfo is None else end
+            if not local_start or not local_end or local_end <= local_start:
+                continue
+            # A short/early call ending does not finish the scheduled lecture.
+            # Late overruns extend the wait. Freshness uses the oldest current
+            # roster calculation, so one updated learner cannot finalize everyone.
+            ends = [local_end.astimezone(dt.timezone.utc)]
+            if o.get('actual_end'):
+                ends.append(as_utc(o['actual_end']))
+            finished = max(ends)
+            refreshed = as_utc(o.get('attendance_finalized_at'))
+            if now < finished + ATTENDANCE_PUBLICATION_DELAY or refreshed is None or refreshed < finished:
+                continue
             self.sessions.append({
                 'id': o['id'], 'number': o['session_number'],
                 'date': local_start.date() if local_start else None,

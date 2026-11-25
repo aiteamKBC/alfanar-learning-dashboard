@@ -85,8 +85,13 @@ QUERIES = {
         join "Learner".learners l on s.learner_id = l.enrolment_id::text
         where s.activity_id in ({_COMPONENT_IDS}) and l.id in ({_ROSTER})
         order by s.submitted_at nulls first, s.id""",
-    'occurrences': """
-        select o.id, o.session_number, o.scheduled_start, o.scheduled_end, o.status, ls.timezone
+    'occurrences': f"""
+        select o.id, o.session_number, o.scheduled_start, o.scheduled_end, o.actual_end, o.status, ls.timezone,
+               (select case when count(*) > 0 and count(a.calculated_at) = count(*)
+                            then min(a.calculated_at) end
+                from curriculum.live_session_learner_attendance a
+                where a.occurrence_id = o.id and a.module_catalogue_id = %(module)s
+                  and a.learner_profile_id in ({_ROSTER})) as attendance_finalized_at
         from curriculum.live_session_occurrences o
         join curriculum.live_sessions ls on ls.id = o.live_session_id
         where ls.module_catalogue_id = %(module)s
