@@ -44,7 +44,9 @@ def snapshot():
                       'submitted_at': dt.datetime(2026, 11, 24, 9, 0, tzinfo=UTC)}],
         occurrences=[
             {'id': COMPLETED, 'session_number': 1, 'scheduled_start': dt.datetime(2026, 11, 23, 10, 0),
-             'scheduled_end': dt.datetime(2026, 11, 23, 12, 0), 'status': 'completed', 'timezone': 'GMT Standard Time'},
+             'scheduled_end': dt.datetime(2026, 11, 23, 12, 0), 'status': 'completed', 'timezone': 'GMT Standard Time',
+             'actual_end': dt.datetime(2026, 11, 23, 12, 1),
+             'attendance_finalized_at': dt.datetime(2026, 11, 23, 14, 5)},
             {'id': SCHEDULED, 'session_number': 2, 'scheduled_start': dt.datetime(2026, 11, 25, 10, 0),
              'scheduled_end': dt.datetime(2026, 11, 25, 12, 0), 'status': 'scheduled', 'timezone': 'GMT Standard Time'},
         ],
@@ -120,6 +122,76 @@ class ArmTests(ApiTestBase):
         module = self.get(f'/api/dashboard/charts?course={ARM_COURSE_ID}')['module_progress'][0]
         self.assertEqual(module['delivered_lectures']['count'], 1)
         self.assertEqual(module['delivered_sessions'], 1)
+
+    def provisional_snapshot(self):
+        value = self.media_snapshot()
+        today = value.occurrences[1]
+        today.update(status='completed', actual_end=dt.datetime(2026, 11, 25, 10, 5),
+                     attendance_finalized_at=dt.datetime(2026, 11, 25, 10, 11))
+        # A recorded short fragment must not make the full scheduled lecture final.
+        value.artifacts.append({**value.artifacts[0], 'id': 'ART-LIVE-FRAGMENT', 'occurrence_id': SCHEDULED})
+        return value
+
+    def test_ongoing_lecture_marked_completed_is_excluded_everywhere(self):
+        from analytics.arm import Arm
+        from analytics.lectures.lms_media import resource_id
+        now = dt.datetime(2026, 11, 25, 10, 25, tzinfo=UTC)
+        with mock.patch('analytics.api.views.load_snapshot', side_effect=self.provisional_snapshot), \
+                mock.patch('analytics.arm.timezone.now', return_value=now):
+            today_id = Arm.lecture_id(SCHEDULED)
+            for path in ('/api/lectures', f'/api/lectures?course={ARM_COURSE_ID}'):
+                self.assertNotIn(today_id, [r['id'] for r in self.get(path)['results']])
+            self.assertEqual(self.client.get('/api/lectures/' + today_id).status_code, 404)
+            self.assertEqual(self.client.get(f'/api/lectures/{today_id}/resources/{resource_id("ART-LIVE-FRAGMENT")}').status_code, 404)
+            summary = self.get(f'/api/dashboard/summary?course={ARM_COURSE_ID}')
+            self.assertEqual(summary['kpis']['attendance']['delivered_sessions'], 1)
+            matrix = self.get(f'/api/learners/{ARM_LEARNER_ID_OFFSET + 501}/courses/{ARM_COURSE_ID}/matrix')
+            self.assertEqual(len(matrix['attendance']['sessions']), 1)
+
+    def test_finished_lecture_waits_for_grace_and_fresh_attendance(self):
+        from analytics.arm import Arm
+        value = self.provisional_snapshot()
+        today = value.occurrences[1]
+        after_grace = dt.datetime(2026, 11, 25, 14, 1, tzinfo=UTC)
+        # The fragment's pre-end calculation remains provisional even much later.
+        self.assertNotIn(SCHEDULED, [s['id'] for s in Arm(value, now=after_grace).sessions])
+        today['attendance_finalized_at'] = dt.datetime(2026, 11, 25, 12, 10)
+        self.assertNotIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 11, 25, 13, 59, 59, tzinfo=UTC)).sessions])
+        ready = Arm(value, now=dt.datetime(2026, 11, 25, 14, 0, tzinfo=UTC))
+        self.assertIn(SCHEDULED, [s['id'] for s in ready.sessions])
+        # Publication never changes the source attendance classification/duration.
+        detail = ready.lecture_detail(Arm.lecture_id(SCHEDULED))
+        self.assertEqual(detail['participants'][0]['attendance'], 'present')
+        self.assertEqual(detail['participants'][0]['duration_seconds'], 60)
+
+    def test_actual_overrun_extends_publication_wait_and_requires_freshness(self):
+        from analytics.arm import Arm
+        value = self.provisional_snapshot()
+        today = value.occurrences[1]
+        today.update(actual_end=dt.datetime(2026, 11, 25, 12, 39),
+                     attendance_finalized_at=dt.datetime(2026, 11, 25, 12, 40))
+        self.assertNotIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 11, 25, 14, 38, 59, tzinfo=UTC)).sessions])
+        self.assertIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 11, 25, 14, 39, tzinfo=UTC)).sessions])
+        today['attendance_finalized_at'] = dt.datetime(2026, 11, 25, 12, 20)
+        self.assertNotIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 11, 25, 16, 0, tzinfo=UTC)).sessions])
+
+    def test_missing_finish_or_refresh_cannot_publish_absence(self):
+        from analytics.arm import Arm
+        for field in ('scheduled_start', 'scheduled_end', 'attendance_finalized_at'):
+            with self.subTest(field=field):
+                value = self.provisional_snapshot()
+                value.occurrences[1][field] = None
+                self.assertNotIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 11, 26, tzinfo=UTC)).sessions])
+
+    def test_lms_publication_window_uses_session_timezone_and_dst(self):
+        from analytics.arm import Arm
+        value = self.provisional_snapshot()
+        today = value.occurrences[1]
+        today.update(scheduled_start=dt.datetime(2026, 7, 1, 10), scheduled_end=dt.datetime(2026, 7, 1, 12),
+                     actual_end=None, attendance_finalized_at=dt.datetime(2026, 7, 1, 11, 10))
+        # London is UTC+1 in July: noon ends at 11 UTC, publication at 13 UTC.
+        self.assertNotIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 7, 1, 12, 59, 59, tzinfo=UTC)).sessions])
+        self.assertIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 7, 1, 13, 0, tzinfo=UTC)).sessions])
 
     def test_directory_rows_keep_missing_records_unknown(self):
         rows = {r['name']: r for r in self.get(f'/api/learners?course={ARM_COURSE_ID}&page_size=100')['results']}

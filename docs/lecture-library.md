@@ -105,5 +105,15 @@ next page read without adding this module to the four-course discovery policy.
 LMS attendance statuses/durations and the current speaking-time projection stay
 unchanged; this media connection does not infer learner speech from labels.
 
+The live LMS `completed` flag alone does not finalize attendance: a short ended
+call can set it while the scheduled lecture is still running. ARM publication
+waits until the later of the scheduled end (in the session timezone) and actual
+UTC end, plus the existing two-hour evidence delay. Every current cohort attendance
+row must have a non-null calculation timestamp at/after that end. Early fragments,
+ongoing/future sessions and stale/partially refreshed attendance stay out of lecture
+lists, detail/media routes, learner attendance and dashboard denominators. Once
+eligible, the LMS statuses/durations are displayed as stored. These are read-only
+publication checks; no source attendance, schedules or library rows are rewritten.
+
 Validation: `python backend/manage.py test analytics.tests.test_lecture_library`
 and `npm --prefix frontend run build`.
