@@ -20,7 +20,7 @@ export interface Summary {
 
 export interface DeliveredLectures {
   count: number | null
-  source: 'owner_confirmed' | 'owner_confirmed_plus_verified' | 'teams' | 'attendance_matrix' | null
+  source: 'owner_confirmed' | 'owner_confirmed_plus_verified' | 'teams' | 'attendance_matrix' | 'lms' | null
   historical_count?: number
   new_occurrences?: number
   teams_sessions: number | null
@@ -126,7 +126,7 @@ export interface QuizCell {
 }
 
 export interface MatrixRow {
-  activity_id: number
+  activity_id: number | string
   kind: Kind
   kind_label: string
   title: string
