@@ -160,6 +160,22 @@ ATTENDANCE_RECONCILIATION_MIN_MINUTES = int(os.environ.get("ATTENDANCE_RECONCILI
 # A lecture occurrence counts as "delivered" when at least this many verified learners attended it.
 TEAMS_MIN_LEARNERS_FOR_DELIVERED = int(os.environ.get("TEAMS_MIN_LEARNERS_FOR_DELIVERED", "5"))
 
+def _lms_database_url() -> str:
+    """Live, read-only LMS PostgreSQL (Advanced Research Methods only). Never stored or cached.
+
+    The process environment wins; otherwise only this one key is read from backend/.env,
+    without copying it into os.environ.
+    """
+    value = (os.environ.get("LMS_DATABASE_URL") or "").strip()
+    if not value and dotenv_values and (BASE_DIR / ".env").is_file():
+        value = (dotenv_values(BASE_DIR / ".env").get("LMS_DATABASE_URL") or "").strip()
+    return value
+
+
+LMS_DATABASE_URL = _lms_database_url()
+LMS_CONNECT_TIMEOUT_SECONDS = int(os.environ.get("LMS_CONNECT_TIMEOUT_SECONDS", "8"))
+LMS_STATEMENT_TIMEOUT_MS = int(os.environ.get("LMS_STATEMENT_TIMEOUT_MS", "15000"))
+
 GOOGLE_SHEETS_ENABLED = env_bool("GOOGLE_SHEETS_ENABLED", False)
 # GOOGLE_SHEETS_ID is accepted as an alias.
 GOOGLE_SHEETS_SPREADSHEET_ID = (

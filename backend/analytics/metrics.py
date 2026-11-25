@@ -455,7 +455,10 @@ def learner_directory(search=None, course_id=None, engagement=None, ordering="na
                             for p in sorted(payloads, key=lambda p: course_order_key(p["course_id"], p["course"]))],
             **roll,
         })
+    return sort_directory_rows(rows, ordering)
 
+
+def sort_directory_rows(rows: list[dict], ordering="name") -> list[dict]:
     desc = ordering.startswith("-")
     key = ordering.lstrip("-")
     sort_keys = {

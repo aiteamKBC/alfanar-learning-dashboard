@@ -5,3 +5,5 @@ DATABASES = {
     'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'},
     'lecture_library': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'},
 }
+# Live LMS reads are never made from tests; ARM tests inject a synthetic snapshot.
+LMS_DATABASE_URL = ''
