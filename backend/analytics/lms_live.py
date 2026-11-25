@@ -100,6 +100,17 @@ QUERIES = {
         where a.module_catalogue_id = %(module)s and a.occurrence_id in ({_COMPLETED_OCCURRENCES})
           and a.learner_profile_id in ({_ROSTER})
         order by a.occurrence_id, a.learner_profile_id, a.updated_at desc nulls last, a.id desc""",
+    # Use the artifact's exact meeting/organizer, not the parent recurring-series ID.
+    # No transcripts, playback URLs, storage credentials or media are copied/cached.
+    'artifacts': f"""
+        select a.id, a.occurrence_id, a.artifact_type, a.graph_artifact_id, a.created_datetime,
+               a.metadata->>'meetingId' as meeting_id,
+               a.metadata->'meetingOrganizer'->'user'->>'id' as organizer_id
+        from curriculum.live_session_artifacts a
+        where a.occurrence_id in ({_COMPLETED_OCCURRENCES})
+          and a.artifact_type in ('recording', 'transcript')
+          and coalesce(a.metadata->>'lmsHiddenFromLearners', 'false') <> 'true'
+        order by a.created_datetime nulls last, a.id""",
 }
 assert all(sql.lstrip().lower().startswith('select') for sql in QUERIES.values())
 
@@ -115,6 +126,7 @@ class ArmSnapshot:
     submissions: list[dict] = field(default_factory=list)
     occurrences: list[dict] = field(default_factory=list)
     attendance: list[dict] = field(default_factory=list)
+    artifacts: list[dict] = field(default_factory=list)
 
 
 def _read(conn) -> dict[str, list[dict]]:

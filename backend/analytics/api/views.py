@@ -5,7 +5,8 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.http import Http404
 from django.views.decorators.csrf import ensure_csrf_cookie
-from rest_framework.decorators import api_view, permission_classes, throttle_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes, renderer_classes
+from rest_framework.renderers import JSONRenderer
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -22,12 +23,19 @@ from .permissions import has_dashboard_access
 from ..models import ActivityKind, Course, Enrollment, Learner
 from ..lectures import library
 from ..lectures.media import resource_response
+from ..lectures.lms_media import response as lms_resource_response
 from lecture_library.models import LectureResource
 
 
 class LmsUnavailableError(APIException):
     status_code = 503
     default_detail = "The LMS is currently unavailable. Please try again."
+
+
+class TranscriptFormatRenderer(JSONRenderer):
+    # Accept the existing ?format=vtt download link during DRF negotiation.
+    # Successful downloads supply their own text/vtt HttpResponse; errors stay JSON.
+    format = 'vtt'
 
 
 def _arm(required: bool):
@@ -288,7 +296,8 @@ def lecture_list(request):
         return Response({
             "count": count, "page": page, "page_size": size, "pages": max(1, -(-count // size)),
             "cohort_count": len(arm.learners), "timezone": "Africa/Cairo",
-            "total_recordings": 0, "playable_recordings": 0, "updated_at": None,
+            "total_recordings": sum(row['recordings'] for row in rows),
+            "playable_recordings": sum(row['playable_recordings'] for row in rows), "updated_at": None,
             "results": rows[(page - 1) * size:page * size],
         })
     queryset = library.lecture_queryset()
@@ -321,8 +330,8 @@ def lecture_list(request):
     return Response({
         "count": count, "page": page, "page_size": size, "pages": max(1, -(-count // size)),
         "cohort_count": len(learners), "timezone": "Africa/Cairo",
-        "total_recordings": LectureResource.objects.filter(lecture__in=queryset, kind="recording").count(),
-        "playable_recordings": LectureResource.objects.filter(lecture__in=queryset, kind="recording", readable=True).count(),
+        "total_recordings": LectureResource.objects.filter(lecture__in=queryset, kind="recording").count() + sum(row['recordings'] for row in arm_rows),
+        "playable_recordings": LectureResource.objects.filter(lecture__in=queryset, kind="recording", readable=True).count() + sum(row['playable_recordings'] for row in arm_rows),
         "updated_at": queryset.aggregate(last=Max("updated_at"))["last"],
         "results": results,
     })
@@ -344,9 +353,14 @@ def lecture_detail(request, lecture_id):
 
 
 @api_view(["GET"])
+@renderer_classes([JSONRenderer, TranscriptFormatRenderer])
 def lecture_resource(request, lecture_id, resource_id):
     lecture = library.resolve_lecture(lecture_id)
     if lecture is None:
+        if configured():
+            asset = _arm(required=True).lecture_resource(str(lecture_id), resource_id)
+            if asset is not None:
+                return lms_resource_response(request, lecture_id, asset)
         raise Http404
     asset = get_object_or_404(LectureResource.objects.select_related("lecture"),
                               pk=resource_id, lecture_id=lecture_id)

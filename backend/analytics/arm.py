@@ -18,6 +18,7 @@ from . import lms_live
 from .course_labels import course_order_key
 from .lms_live import ARM_COURSE_ID, ARM_LEARNER_ID_OFFSET, ARM_TITLE, as_utc
 from .metrics import KIND_LABELS, LESSON_KIND_VALUES, _avg, _pct, defs, learner_rollup
+from .lectures.lms_media import resource_id, valid_reference
 
 # LMS component types with a direct dashboard equivalent. Lecture components are reported
 # through the LMS live-session records instead; other types have no dashboard column.
@@ -111,6 +112,10 @@ class Arm:
         for n, s in enumerate(self.sessions, start=1):
             s['number'] = s['number'] or n
         session_ids = {s['id'] for s in self.sessions}
+        self.artifacts = defaultdict(list)
+        for row in snapshot.artifacts:
+            if row['occurrence_id'] in session_ids and valid_reference(row):
+                self.artifacts[row['occurrence_id']].append(row)
         self.attendance = {(a['learner_profile_id'], a['occurrence_id']): a for a in snapshot.attendance
                            if a['occurrence_id'] in session_ids and a['learner_profile_id'] in self.by_lms}
         self.present_by_session = Counter(occ for (_, occ), a in self.attendance.items()
@@ -493,13 +498,17 @@ class Arm:
             if (start and (s['date'] is None or s['date'] < start)) or (end and (s['date'] is None or s['date'] > end)):
                 continue
             records = [self.attendance.get((x['lms_id'], s['id'])) for x in self.learners]
+            assets = self.artifacts[s['id']]
+            recordings = sum(a['artifact_type'] == 'recording' for a in assets)
+            transcripts = sum(a['artifact_type'] == 'transcript' for a in assets)
             rows.append({
                 'id': self.lecture_id(s['id']), 'course_id': ARM_COURSE_ID, 'course': ARM_TITLE, 'date': s['date'],
                 'starts_at': s['starts_at'], 'ends_at': s['ends_at'], 'source': 'LMS live session',
                 'recording_session': False, 'learners': len(self.learners),
                 'present': self.present_by_session[s['id']],
                 'recorded': sum(1 for r in records if r and r['attendance_status'] in KNOWN_STATUSES),
-                'recordings': 0, 'playable_recordings': 0, 'transcripts': 0, 'readable_transcripts': 0,
+                'recordings': recordings, 'playable_recordings': recordings,
+                'transcripts': transcripts, 'readable_transcripts': transcripts,
                 'verified_speakers': 0, 'speaking_covered': 0, 'updated_at': None,
             })
         return rows
@@ -521,8 +530,19 @@ class Arm:
                 'speaking_seconds': None, 'speaking_match': None, 'speaking_partial': False,
                 'camera_on': None, 'microphone_on': None, 'needs_review': False,
             })
-        return {**summary, 'participants': participants, 'resources': [], 'recording_folder_url': None,
+        assets = [{'id': resource_id(a['id']), 'kind': a['artifact_type'], 'available': True,
+                   'created_at': as_utc(a['created_datetime']),
+                   'url': f"/api/lectures/{lecture_id}/resources/{resource_id(a['id'])}"}
+                  for a in self.artifacts[session['id']]]
+        return {**summary, 'participants': participants, 'resources': assets, 'recording_folder_url': None,
                 'timezone': 'Africa/Cairo'}
+
+    def lecture_resource(self, lecture_id, asset_id):
+        session = next((s for s in self.sessions if self.lecture_id(s['id']) == str(lecture_id)), None)
+        if session is None:
+            return None
+        found = [row for row in self.artifacts[session['id']] if resource_id(row['id']) == asset_id]
+        return found[0] if len(found) == 1 else None
 
     def standalone(self, learner_id) -> bool:
         """An ARM learner who is not a dashboard learner (served from the LMS alone)."""
