@@ -39,15 +39,69 @@ def registry():
     return learners, unique, enrolled
 
 
-def scoped_observations(lecture, emails, enrolled):
-    return {
-        row.learner_source_id: row for row in lecture.observations.all()
-        if row.learner_source_id in enrolled[lecture.course_source_id]
-        and any(emails.get(email.strip().casefold()) == row.learner_source_id for email in row.source_emails)
-    }
+def canonical_ids():
+    """Original source learner ID -> its current displayed learner, per the active identity projection.
+
+    Owner merges are applied here at read time; stored lecture evidence keeps its original IDs.
+    IDs absent from the projection (e.g. archived originals) map to nothing and stay hidden.
+    """
+    return dict(LearnerIdentity.objects.using('default').values_list('source_id', 'canonical_source_id'))
 
 
-def speaking_result(row, emails):
+def _representative_rank(row, learner_id):
+    # One stored row represents a learner when an owner merge gives them several: Present
+    # (existing rule) before Absent, then the longest stored duration, then the learner's own
+    # row, then the lowest original ID. Values are shown as stored; nothing is summed.
+    status = attendance_status(row.attendance, row.duration_seconds)
+    return (status == "present", status == "absent", row.duration_seconds if row.duration_seconds is not None else -1,
+            row.learner_source_id == learner_id, -row.learner_source_id)
+
+
+def scoped_rows(lecture, emails, enrolled, canonical=None):
+    """Current learner ID -> every stored observation that counts for that learner.
+
+    Enrolled learners with a matching identity email only. A row imported under an original ID
+    that an owner has since merged into another learner counts for that learner.
+    """
+    canonical = canonical_ids() if canonical is None else canonical
+    rows = defaultdict(list)
+    for row in lecture.observations.all():
+        learner_id = canonical.get(row.learner_source_id, row.learner_source_id)
+        if learner_id not in enrolled[lecture.course_source_id]:
+            continue
+        if not any(emails.get(email.strip().casefold()) == learner_id for email in row.source_emails):
+            continue
+        rows[learner_id].append(row)
+    return rows
+
+
+def representative(rows, learner_id):
+    return max(rows, key=lambda row: _representative_rank(row, learner_id))
+
+
+def scoped_observations(lecture, emails, enrolled, canonical=None):
+    """Current learner ID -> one stored observation (see `_representative_rank`), never counted twice."""
+    return {lid: representative(rows, lid) for lid, rows in scoped_rows(lecture, emails, enrolled, canonical).items()}
+
+
+def merged_speaking(rows, emails, learner_id):
+    """(row, seconds, method) of a learner's strongest valid speaking evidence, or (None, None, None).
+
+    Each row is validated as before (`speaking_result`). Across an owner-merged learner's rows,
+    verified identity wins over a meeting-name match, then the longer duration. Speech is never
+    summed across rows: the same utterances may be attributed to more than one account.
+    """
+    best = None
+    for row in rows:
+        seconds, method = speaking_result(row, emails, learner_id)
+        if seconds is not None:
+            key = (method == "verified_identity", seconds, -row.learner_source_id)
+            if best is None or key > best[0]:
+                best = (key, row, seconds, method)
+    return best[1:] if best else (None, None, None)
+
+
+def speaking_result(row, emails, learner_id=None):
     if not row or row.speaking_seconds is None:
         return None, None
     method = "verified_identity" if row.speaker_verified else row.speaking_match
@@ -55,7 +109,8 @@ def speaking_result(row, emails):
     if method not in {"verified_identity", "meeting_name"} or not evidence_emails:
         return None, None
     # A later registry update must not leave stale speech attributed to a learner.
-    if not all(emails.get(email.strip().casefold()) == row.learner_source_id for email in evidence_emails):
+    learner_id = row.learner_source_id if learner_id is None else learner_id
+    if not all(emails.get(email.strip().casefold()) == learner_id for email in evidence_emails):
         return None, None
     return row.speaking_seconds, method
 
@@ -79,9 +134,11 @@ def recording_counts(queryset):
     return len(visible), sum(r.readable for r in visible)
 
 
-def lecture_summary(lecture, emails, enrolled, course_registry):
+def lecture_summary(lecture, emails, enrolled, course_registry, canonical=None):
     course = course_registry.get(lecture.course_source_id)
-    observations = scoped_observations(lecture, emails, enrolled)
+    grouped = scoped_rows(lecture, emails, enrolled, canonical)
+    observations = {lid: representative(rows, lid) for lid, rows in grouped.items()}
+    speaking = [merged_speaking(rows, emails, lid) for lid, rows in grouped.items()]
     resources = visible_resources(lecture)
     return {
         "id": str(lecture.pk), "course_id": course.source_id if course else None,
@@ -95,8 +152,8 @@ def lecture_summary(lecture, emails, enrolled, course_registry):
         "playable_recordings": sum(x.kind == "recording" and x.readable for x in resources),
         "transcripts": sum(x.kind == "transcript" for x in resources),
         "readable_transcripts": sum(x.kind == "transcript" and x.readable for x in resources),
-        "verified_speakers": sum(speaking_result(x, emails)[1] == "verified_identity" for x in observations.values()),
-        "speaking_covered": sum(speaking_result(x, emails)[0] is not None for x in observations.values()),
+        "verified_speakers": sum(method == "verified_identity" for _, _, method in speaking),
+        "speaking_covered": sum(seconds is not None for _, seconds, _ in speaking),
         "updated_at": lecture.updated_at,
     }
 
@@ -112,12 +169,13 @@ def catalogue_queryset():
     """Hide cohort lectures without a Present learner; retain all source evidence."""
     queryset = lecture_queryset()
     _, emails, enrolled = registry()
+    canonical = canonical_ids()
     hidden = [
         lecture.pk
         for lecture in queryset.prefetch_related(None).prefetch_related("observations")
         if enrolled[lecture.course_source_id]
         and not any(attendance_status(row.attendance, row.duration_seconds) == "present"
-                    for row in scoped_observations(lecture, emails, enrolled).values())
+                    for row in scoped_observations(lecture, emails, enrolled, canonical).values())
     ]
     return queryset.exclude(pk__in=hidden)
 
@@ -138,11 +196,13 @@ def resolve_lecture(lecture_id):
 
 def detail(lecture):
     learners, emails, enrolled = registry()
-    observed = scoped_observations(lecture, emails, enrolled)
+    canonical = canonical_ids()
+    grouped = scoped_rows(lecture, emails, enrolled, canonical)
     rows = []
     for lid in sorted(enrolled[lecture.course_source_id], key=lambda pk: (learners[pk].name.casefold(), pk)):
-        learner, row = learners[lid], observed.get(lid)
-        speaking_seconds, speaking_match = speaking_result(row, emails)
+        learner = learners[lid]
+        row = representative(grouped[lid], lid) if lid in grouped else None
+        speech_row, speaking_seconds, speaking_match = merged_speaking(grouped.get(lid, []), emails, lid)
         rows.append({
             "learner_id": learner.source_id, "name": learner.name, "email": learner.email,
             "attendance": attendance_status(row.attendance, row.duration_seconds) if row else "not_available",
@@ -151,7 +211,7 @@ def detail(lecture):
             "duration_seconds": row.duration_seconds if row else None,
             "speaking_seconds": speaking_seconds,
             "speaking_match": speaking_match,
-            "speaking_partial": bool(speaking_seconds is not None and row.speaking_partial),
+            "speaking_partial": bool(speech_row is not None and speech_row.speaking_partial),
             "camera_on": row.camera_on if row else None,
             "microphone_on": row.microphone_on if row else None,
             "needs_review": bool(row and row.needs_review),
@@ -164,7 +224,7 @@ def detail(lecture):
             "url": f"/api/lectures/{lecture.pk}/resources/{asset.pk}" if asset.readable else None,
         })
     return {
-        **lecture_summary(lecture, emails, enrolled, courses()), "participants": rows, "resources": assets,
+        **lecture_summary(lecture, emails, enrolled, courses(), canonical), "participants": rows, "resources": assets,
         "recording_folder_url": lecture.recording_folder_url or None,
         "timezone": "Africa/Cairo",
     }

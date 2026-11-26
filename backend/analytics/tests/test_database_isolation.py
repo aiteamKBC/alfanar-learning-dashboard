@@ -107,14 +107,23 @@ class StorageBoundaryTests(TestCase):
         self.assertEqual(self.client.get(f'/api/lectures/{self.lecture.pk}').status_code, 404)
 
     def test_recreated_registry_primary_keys_do_not_break_or_misattribute_library(self):
+        # A second, unaffected Present learner keeps the lecture listed (lectures without any
+        # Present learner are hidden), so the recreated learner's own row can be checked.
+        other = Learner.objects.create(source_id=101, name='Other learner', email='other@example.invalid')
+        Enrollment.objects.create(course=self.course, learner=other)
+        LectureLearner.objects.create(lecture=self.lecture, learner_source_id=101, source_emails=[other.email], attendance='present')
         self.learner.delete()
         replacement = Learner.objects.create(id=90, source_id=100, name='Synthetic learner', email='synthetic@example.invalid')
         Enrollment.objects.create(course=self.course, learner=replacement)
-        payload = self.client.get(f'/api/lectures/{self.lecture.pk}').json()
-        self.assertEqual(payload['participants'][0]['attendance'], 'present')
+        people = {p['learner_id']: p['attendance'] for p in self.client.get(f'/api/lectures/{self.lecture.pk}').json()['participants']}
+        self.assertEqual(people, {100: 'present', 101: 'present'})
         replacement.email = 'different@example.invalid'; replacement.save()
-        payload = self.client.get(f'/api/lectures/{self.lecture.pk}').json()
-        self.assertEqual(payload['participants'][0]['attendance'], 'not_available')
+        people = {p['learner_id']: p['attendance'] for p in self.client.get(f'/api/lectures/{self.lecture.pk}').json()['participants']}
+        self.assertEqual(people, {100: 'not_available', 101: 'present'})     # never credited to the new email
+        # Without the other learner nobody is Present, so the lecture itself is no longer listed.
+        LectureLearner.objects.filter(learner_source_id=101).delete()
+        self.assertEqual(self.client.get(f'/api/lectures/{self.lecture.pk}').status_code, 404)
+        self.assertEqual(self.client.get('/api/lectures').json()['count'], 0)
 
     def test_unconfigured_library_returns_503_without_affecting_dashboard(self):
         with mock.patch.dict(settings.DATABASES, {'lecture_library': {**settings.DATABASES['lecture_library'], 'ENGINE': 'django.db.backends.dummy'}}):

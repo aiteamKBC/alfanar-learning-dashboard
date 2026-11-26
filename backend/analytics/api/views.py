@@ -308,6 +308,7 @@ def lecture_list(request):
         if name in dates:
             queryset = queryset.filter(**{lookup: dates[name]})
     learners, emails, enrolled = library.registry()
+    canonical = library.canonical_ids()
     course_registry = library.courses()
     queryset = queryset.filter(Q(course_source_id__in=[cid for cid, ids in enrolled.items() if ids]) | Q(course_source_id__isnull=True))
     arm = _arm(required=False) if course is None else None
@@ -322,12 +323,12 @@ def lecture_list(request):
         page = min(max(1, _int_param(request, "page") or 1), max(1, -(-count // size)))
         window = entries[(page - 1) * size:page * size]
         stored = {row.pk: row for row in queryset.filter(pk__in=[pk for kind, pk, _ in window if kind == "library"])}
-        results = [library.lecture_summary(stored[item], emails, enrolled, course_registry) if kind == "library" else item
+        results = [library.lecture_summary(stored[item], emails, enrolled, course_registry, canonical) if kind == "library" else item
                    for kind, item, _ in window]
     else:
         count = queryset.count()
         page = min(max(1, _int_param(request, "page") or 1), max(1, -(-count // size)))
-        results = [library.lecture_summary(row, emails, enrolled, course_registry) for row in queryset[(page - 1) * size:page * size]]
+        results = [library.lecture_summary(row, emails, enrolled, course_registry, canonical) for row in queryset[(page - 1) * size:page * size]]
     recording_count, playable_count = library.recording_counts(queryset)
     return Response({
         "count": count, "page": page, "page_size": size, "pages": max(1, -(-count // size)),
