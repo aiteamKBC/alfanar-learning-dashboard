@@ -108,7 +108,7 @@ QUERIES = {
     # Use the artifact's exact meeting/organizer, not the parent recurring-series ID.
     # No transcripts, playback URLs, storage credentials or media are copied/cached.
     'artifacts': f"""
-        select a.id, a.occurrence_id, a.artifact_type, a.graph_artifact_id, a.created_datetime,
+        select a.id, a.occurrence_id, a.artifact_type, a.graph_artifact_id, a.created_datetime, a.end_datetime,
                a.metadata->>'meetingId' as meeting_id,
                a.metadata->'meetingOrganizer'->'user'->>'id' as organizer_id
         from curriculum.live_session_artifacts a

@@ -327,11 +327,12 @@ def lecture_list(request):
         count = queryset.count()
         page = min(max(1, _int_param(request, "page") or 1), max(1, -(-count // size)))
         results = [library.lecture_summary(row, emails, enrolled, course_registry) for row in queryset[(page - 1) * size:page * size]]
+    recording_count, playable_count = library.recording_counts(queryset)
     return Response({
         "count": count, "page": page, "page_size": size, "pages": max(1, -(-count // size)),
         "cohort_count": len(learners), "timezone": "Africa/Cairo",
-        "total_recordings": LectureResource.objects.filter(lecture__in=queryset, kind="recording").count() + sum(row['recordings'] for row in arm_rows),
-        "playable_recordings": LectureResource.objects.filter(lecture__in=queryset, kind="recording", readable=True).count() + sum(row['playable_recordings'] for row in arm_rows),
+        "total_recordings": recording_count + sum(row['recordings'] for row in arm_rows),
+        "playable_recordings": playable_count + sum(row['playable_recordings'] for row in arm_rows),
         "updated_at": queryset.aggregate(last=Max("updated_at"))["last"],
         "results": results,
     })

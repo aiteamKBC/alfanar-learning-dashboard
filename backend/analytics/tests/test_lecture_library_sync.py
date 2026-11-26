@@ -4,7 +4,7 @@ import datetime as dt
 import json
 from unittest import mock
 
-from django.test import TestCase, SimpleTestCase
+from django.test import TestCase, SimpleTestCase, override_settings
 
 from analytics.attendance.graph_client import GraphError
 from analytics.lectures.importer import import_source, timestamp
@@ -157,6 +157,9 @@ class FakeGraph:
 class CollectorTests(IncrementalTests):
     def setUp(self):
         super().setUp()
+        settings_override = override_settings(LECTURE_RECORDING_DURATIONS_FILE=self.path.with_name('durations.json'))
+        settings_override.enable()
+        self.addCleanup(settings_override.disable)
         response = mock.Mock(status=206)
         response.read.return_value = b'x'
         patch = mock.patch('analytics.lectures.sync.open_recording', return_value=response)
@@ -270,6 +273,7 @@ class CollectorTests(IncrementalTests):
             run_sync(config, client=FakeGraph(self.source()), now=timestamp('2026-10-01T15:00:00Z'), dry_run=True)
         self.assertEqual(self.path.read_bytes(), before)
         self.assertEqual(LectureCapture.objects.count(), 0)
+        self.assertFalse(self.path.with_name('durations.json').exists())
 
     def test_live_repeat_and_changed_cutover(self):
         self.path.write_text(json.dumps(self.source()), encoding='utf8')
@@ -280,6 +284,7 @@ class CollectorTests(IncrementalTests):
             for _ in range(2):
                 run_sync(config, client=FakeGraph(self.source()), now=timestamp('2026-10-01T15:00:00Z'))
             self.assertEqual(LectureCapture.objects.count(), 1)
+            self.assertEqual(json.loads(self.path.with_name('durations.json').read_text())['version'], 1)
             options['since'] = '2026-09-30T00:00:00Z'
             atomic_json(config, options)
             with self.assertRaisesMessage(ValueError, 'immutable'):

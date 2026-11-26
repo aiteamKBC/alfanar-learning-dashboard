@@ -6,6 +6,7 @@ from django.conf import settings
 from rest_framework.exceptions import APIException
 from ..models import Course, Enrollment, Learner, LearnerIdentity
 from lecture_library.models import LectureCapture, LectureResource
+from .recordings import duration_index, stored_duration, select_recordings
 
 
 def require_database():
@@ -58,10 +59,29 @@ def speaking_result(row, emails):
     return row.speaking_seconds, method
 
 
+def visible_resources(lecture):
+    resources = list(lecture.resources.all())
+    index = duration_index()
+    selected = {r.pk for r in select_recordings([r for r in resources if r.kind == 'recording'],
+                lambda r: stored_duration(r, index), lambda r: r.readable)}
+    return [r for r in resources if r.kind != 'recording' or r.pk in selected]
+
+
+def recording_counts(queryset):
+    grouped = defaultdict(list)
+    for asset in LectureResource.objects.filter(lecture__in=queryset, kind='recording').only(
+            'lecture_id', 'provider', 'drive_id', 'organizer_id', 'meeting_id', 'source_id', 'readable'):
+        grouped[asset.lecture_id].append(asset)
+    index = duration_index()
+    visible = [r for rows in grouped.values() for r in select_recordings(rows,
+               lambda r: stored_duration(r, index), lambda r: r.readable)]
+    return len(visible), sum(r.readable for r in visible)
+
+
 def lecture_summary(lecture, emails, enrolled, course_registry):
     course = course_registry.get(lecture.course_source_id)
     observations = scoped_observations(lecture, emails, enrolled)
-    resources = list(lecture.resources.all())
+    resources = visible_resources(lecture)
     return {
         "id": str(lecture.pk), "course_id": course.source_id if course else None,
         "course": course.display_title if course else "Alfanar — module unconfirmed", "date": lecture.session_date,
@@ -122,7 +142,7 @@ def detail(lecture):
             "needs_review": bool(row and row.needs_review),
         })
     assets = []
-    for asset in sorted(lecture.resources.all(), key=lambda a: (a.kind, a.source_created_at.isoformat() if a.source_created_at else "", a.pk)):
+    for asset in sorted(visible_resources(lecture), key=lambda a: (a.kind, a.source_created_at.isoformat() if a.source_created_at else "", a.pk)):
         assets.append({
             "id": asset.pk, "kind": asset.kind, "available": asset.readable,
             "created_at": asset.source_created_at,

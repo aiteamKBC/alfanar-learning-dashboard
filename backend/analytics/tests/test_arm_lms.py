@@ -152,12 +152,12 @@ class ArmTests(ApiTestBase):
         from analytics.arm import Arm
         value = self.provisional_snapshot()
         today = value.occurrences[1]
-        after_grace = dt.datetime(2026, 11, 25, 14, 1, tzinfo=UTC)
+        after_grace = dt.datetime(2026, 11, 25, 12, 16, tzinfo=UTC)
         # The fragment's pre-end calculation remains provisional even much later.
         self.assertNotIn(SCHEDULED, [s['id'] for s in Arm(value, now=after_grace).sessions])
         today['attendance_finalized_at'] = dt.datetime(2026, 11, 25, 12, 10)
-        self.assertNotIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 11, 25, 13, 59, 59, tzinfo=UTC)).sessions])
-        ready = Arm(value, now=dt.datetime(2026, 11, 25, 14, 0, tzinfo=UTC))
+        self.assertNotIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 11, 25, 12, 14, 59, tzinfo=UTC)).sessions])
+        ready = Arm(value, now=dt.datetime(2026, 11, 25, 12, 15, tzinfo=UTC))
         self.assertIn(SCHEDULED, [s['id'] for s in ready.sessions])
         # Publication never changes the source attendance classification/duration.
         detail = ready.lecture_detail(Arm.lecture_id(SCHEDULED))
@@ -170,8 +170,8 @@ class ArmTests(ApiTestBase):
         today = value.occurrences[1]
         today.update(actual_end=dt.datetime(2026, 11, 25, 12, 39),
                      attendance_finalized_at=dt.datetime(2026, 11, 25, 12, 40))
-        self.assertNotIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 11, 25, 14, 38, 59, tzinfo=UTC)).sessions])
-        self.assertIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 11, 25, 14, 39, tzinfo=UTC)).sessions])
+        self.assertNotIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 11, 25, 12, 53, 59, tzinfo=UTC)).sessions])
+        self.assertIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 11, 25, 12, 54, tzinfo=UTC)).sessions])
         today['attendance_finalized_at'] = dt.datetime(2026, 11, 25, 12, 20)
         self.assertNotIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 11, 25, 16, 0, tzinfo=UTC)).sessions])
 
@@ -189,9 +189,19 @@ class ArmTests(ApiTestBase):
         today = value.occurrences[1]
         today.update(scheduled_start=dt.datetime(2026, 7, 1, 10), scheduled_end=dt.datetime(2026, 7, 1, 12),
                      actual_end=None, attendance_finalized_at=dt.datetime(2026, 7, 1, 11, 10))
-        # London is UTC+1 in July: noon ends at 11 UTC, publication at 13 UTC.
-        self.assertNotIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 7, 1, 12, 59, 59, tzinfo=UTC)).sessions])
-        self.assertIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 7, 1, 13, 0, tzinfo=UTC)).sessions])
+        # London is UTC+1 in July: noon ends at 11 UTC, publication at 11:15 UTC.
+        self.assertNotIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 7, 1, 11, 14, 59, tzinfo=UTC)).sessions])
+        self.assertIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026, 7, 1, 11, 15, tzinfo=UTC)).sessions])
+
+    @override_settings(LMS_ATTENDANCE_PUBLICATION_DELAY_MINUTES=30)
+    def test_shorter_delay_is_configurable_without_bypassing_report_freshness(self):
+        from analytics.arm import Arm
+        value = self.provisional_snapshot()
+        value.occurrences[1]['attendance_finalized_at'] = dt.datetime(2026,11,25,12,10)
+        self.assertNotIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026,11,25,12,29,59,tzinfo=UTC)).sessions])
+        self.assertIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026,11,25,12,30,tzinfo=UTC)).sessions])
+        value.occurrences[1]['attendance_finalized_at'] = dt.datetime(2026,11,25,10,11)
+        self.assertNotIn(SCHEDULED, [s['id'] for s in Arm(value, now=dt.datetime(2026,11,25,12,45,tzinfo=UTC)).sessions])
 
     def test_directory_rows_keep_missing_records_unknown(self):
         rows = {r['name']: r for r in self.get(f'/api/learners?course={ARM_COURSE_ID}&page_size=100')['results']}
@@ -365,6 +375,25 @@ class ArmTests(ApiTestBase):
             for asset in detail['resources']:
                 self.assertLess(asset['id'], 2**53)
                 self.assertTrue(asset['url'].startswith(f'/api/lectures/{lecture_id}/resources/'))
+
+    def test_lms_short_recordings_hidden_for_existing_and_future_occurrences(self):
+        from analytics.arm import Arm
+        value = self.media_snapshot()
+        video = value.artifacts[0]
+        video['end_datetime'] = dt.datetime(2026,11,23,12)
+        value.artifacts.append({**video,'id':'ART-SHORT','end_datetime':dt.datetime(2026,11,23,10,1)})
+        value.artifacts.append({**video,'id':'ART-LONG-PART','end_datetime':dt.datetime(2026,11,23,11)})
+        with mock.patch('analytics.api.views.load_snapshot', return_value=value):
+            detail = self.get('/api/lectures/' + Arm.lecture_id(COMPLETED))
+            self.assertEqual(detail['recordings'], 2)
+            self.assertEqual(detail['transcripts'], 1)
+            self.assertEqual(len(detail['participants']), 2)
+            self.assertEqual(self.get(f'/api/lectures?course={ARM_COURSE_ID}')['total_recordings'], 2)
+        value.occurrences[0].update(scheduled_start=dt.datetime(2026,12,1,10),scheduled_end=dt.datetime(2026,12,1,12),
+            actual_end=dt.datetime(2026,12,1,12),attendance_finalized_at=dt.datetime(2026,12,1,12,5))
+        arm = Arm(value, now=dt.datetime(2026,12,2,tzinfo=UTC))
+        self.assertEqual(arm.lectures()[0]['recordings'], 2)
+        self.assertEqual(len(value.artifacts), 4)
 
     def test_lms_recording_uses_artifact_meeting_and_existing_range_proxy(self):
         from analytics.arm import Arm

@@ -71,8 +71,5 @@ async function signOut() {
     <main class="mx-auto px-4 py-6 sm:px-6 lg:px-8 lg:py-8" :class="route.name === 'learners' ? 'max-w-none' : 'max-w-[1480px]'">
       <RouterView />
     </main>
-    <footer class="mx-auto flex max-w-[1480px] flex-wrap items-center gap-2 px-4 pb-8 text-[11.5px] text-ink-3 sm:px-6 lg:px-8">
-      <Icon name="shield" :size="13" /> Confidential learner records · read-only view of LMS data · all figures are calculated from imported source records.
-    </footer>
   </div>
 </template>

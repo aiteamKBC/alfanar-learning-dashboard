@@ -13,6 +13,7 @@ import datetime as dt
 import uuid
 from collections import Counter, defaultdict
 from zoneinfo import ZoneInfo
+from django.conf import settings
 from django.utils import timezone
 
 from . import lms_live
@@ -20,6 +21,7 @@ from .course_labels import course_order_key
 from .lms_live import ARM_COURSE_ID, ARM_LEARNER_ID_OFFSET, ARM_TITLE, as_utc
 from .metrics import KIND_LABELS, LESSON_KIND_VALUES, _avg, _pct, defs, learner_rollup
 from .lectures.lms_media import resource_id, valid_reference
+from .lectures.recordings import select_recordings, seconds_between
 
 # LMS component types with a direct dashboard equivalent. Lecture components are reported
 # through the LMS live-session records instead; other types have no dashboard column.
@@ -30,9 +32,6 @@ SESSION_ZONES = {'GMT Standard Time': 'Europe/London', 'UTC': 'UTC', 'Coordinate
                  'Egypt Standard Time': 'Africa/Cairo', 'Arabian Standard Time': 'Asia/Dubai',
                  'Arab Standard Time': 'Asia/Riyadh'}
 KNOWN_STATUSES = {'present', 'absent'}
-# LMS "completed" can refer to a short report fragment while a lecture is live.
-# Keep the existing two-hour post-meeting evidence delay for this read-only view.
-ATTENDANCE_PUBLICATION_DELAY = dt.timedelta(hours=2)
 # The LMS stores no module progress percentage for this module. Approved display fallback for
 # enrolled learners in ARM views only; it is not an LMS value and is never written anywhere.
 # Cross-module averages exclude it (see `rollup`).
@@ -40,7 +39,7 @@ PROGRESS_FALLBACK = 0.0
 
 DEFINITIONS = {
     'attendance': 'Present / recorded LMS attendance observations for completed lectures, using the LMS '
-                  'learner attendance statuses as stored, after the lecture has ended, the two-hour '
+                  'learner attendance statuses as stored, after the lecture has ended, the '
                   'reporting delay has passed and the LMS attendance has been refreshed after its end.',
     'delivered_lectures': 'Completed LMS lectures whose end, reporting delay and attendance refresh are confirmed.',
     'delivered_sessions': 'Completed LMS lectures whose end, reporting delay and attendance refresh are confirmed.',
@@ -71,6 +70,7 @@ class Arm:
 
     def __init__(self, snapshot: lms_live.ArmSnapshot, registry=None, *, now=None):
         now = now if now is not None else timezone.now()
+        publication_delay = dt.timedelta(minutes=settings.LMS_ATTENDANCE_PUBLICATION_DELAY_MINUTES)
         dashboard_learners, emails = registry if registry is not None else _dashboard_registry()
         self.components = []
         for c in snapshot.components:
@@ -119,7 +119,7 @@ class Arm:
                 ends.append(as_utc(o['actual_end']))
             finished = max(ends)
             refreshed = as_utc(o.get('attendance_finalized_at'))
-            if now < finished + ATTENDANCE_PUBLICATION_DELAY or refreshed is None or refreshed < finished:
+            if now < finished + publication_delay or refreshed is None or refreshed < finished:
                 continue
             self.sessions.append({
                 'id': o['id'], 'number': o['session_number'],
@@ -134,6 +134,11 @@ class Arm:
         for row in snapshot.artifacts:
             if row['occurrence_id'] in session_ids and valid_reference(row):
                 self.artifacts[row['occurrence_id']].append(row)
+        for occurrence_id, assets in self.artifacts.items():
+            recordings = select_recordings([a for a in assets if a['artifact_type'] == 'recording'],
+                                           lambda a: seconds_between(a.get('created_datetime'), a.get('end_datetime')))
+            selected = {a['id'] for a in recordings}
+            self.artifacts[occurrence_id] = [a for a in assets if a['artifact_type'] != 'recording' or a['id'] in selected]
         self.attendance = {(a['learner_profile_id'], a['occurrence_id']): a for a in snapshot.attendance
                            if a['occurrence_id'] in session_ids and a['learner_profile_id'] in self.by_lms}
         self.present_by_session = Counter(occ for (_, occ), a in self.attendance.items()
