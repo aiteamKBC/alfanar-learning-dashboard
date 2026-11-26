@@ -179,6 +179,9 @@ def _lms_database_url() -> str:
 LMS_DATABASE_URL = _lms_database_url()
 LMS_CONNECT_TIMEOUT_SECONDS = int(os.environ.get("LMS_CONNECT_TIMEOUT_SECONDS", "8"))
 LMS_STATEMENT_TIMEOUT_MS = int(os.environ.get("LMS_STATEMENT_TIMEOUT_MS", "15000"))
+LMS_ATTENDANCE_PUBLICATION_DELAY_MINUTES = int(os.environ.get("LMS_ATTENDANCE_PUBLICATION_DELAY_MINUTES", "15"))
+if not 1 <= LMS_ATTENDANCE_PUBLICATION_DELAY_MINUTES <= 1440:
+    raise ImproperlyConfigured('LMS_ATTENDANCE_PUBLICATION_DELAY_MINUTES must be between 1 and 1440.')
 
 GOOGLE_SHEETS_ENABLED = env_bool("GOOGLE_SHEETS_ENABLED", False)
 # GOOGLE_SHEETS_ID is accepted as an alias.

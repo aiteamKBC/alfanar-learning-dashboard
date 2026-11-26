@@ -109,7 +109,9 @@ unchanged; this media connection does not infer learner speech from labels.
 The live LMS `completed` flag alone does not finalize attendance: a short ended
 call can set it while the scheduled lecture is still running. ARM publication
 waits until the later of the scheduled end (in the session timezone) and actual
-UTC end, plus the existing two-hour evidence delay. Every current cohort attendance
+UTC end, plus a 15-minute reporting delay by default. Configure
+`LMS_ATTENDANCE_PUBLICATION_DELAY_MINUTES` to adjust this read-only LMS display
+delay (1–1440 minutes). Every current cohort attendance
 row must have a non-null calculation timestamp at/after that end. Early fragments,
 ongoing/future sessions and stale/partially refreshed attendance stay out of lecture
 lists, detail/media routes, learner attendance and dashboard denominators. Once

@@ -13,6 +13,7 @@ import datetime as dt
 import uuid
 from collections import Counter, defaultdict
 from zoneinfo import ZoneInfo
+from django.conf import settings
 from django.utils import timezone
 
 from . import lms_live
@@ -31,9 +32,6 @@ SESSION_ZONES = {'GMT Standard Time': 'Europe/London', 'UTC': 'UTC', 'Coordinate
                  'Egypt Standard Time': 'Africa/Cairo', 'Arabian Standard Time': 'Asia/Dubai',
                  'Arab Standard Time': 'Asia/Riyadh'}
 KNOWN_STATUSES = {'present', 'absent'}
-# LMS "completed" can refer to a short report fragment while a lecture is live.
-# Keep the existing two-hour post-meeting evidence delay for this read-only view.
-ATTENDANCE_PUBLICATION_DELAY = dt.timedelta(hours=2)
 # The LMS stores no module progress percentage for this module. Approved display fallback for
 # enrolled learners in ARM views only; it is not an LMS value and is never written anywhere.
 # Cross-module averages exclude it (see `rollup`).
@@ -41,7 +39,7 @@ PROGRESS_FALLBACK = 0.0
 
 DEFINITIONS = {
     'attendance': 'Present / recorded LMS attendance observations for completed lectures, using the LMS '
-                  'learner attendance statuses as stored, after the lecture has ended, the two-hour '
+                  'learner attendance statuses as stored, after the lecture has ended, the '
                   'reporting delay has passed and the LMS attendance has been refreshed after its end.',
     'delivered_lectures': 'Completed LMS lectures whose end, reporting delay and attendance refresh are confirmed.',
     'delivered_sessions': 'Completed LMS lectures whose end, reporting delay and attendance refresh are confirmed.',
@@ -72,6 +70,7 @@ class Arm:
 
     def __init__(self, snapshot: lms_live.ArmSnapshot, registry=None, *, now=None):
         now = now if now is not None else timezone.now()
+        publication_delay = dt.timedelta(minutes=settings.LMS_ATTENDANCE_PUBLICATION_DELAY_MINUTES)
         dashboard_learners, emails = registry if registry is not None else _dashboard_registry()
         self.components = []
         for c in snapshot.components:
@@ -120,7 +119,7 @@ class Arm:
                 ends.append(as_utc(o['actual_end']))
             finished = max(ends)
             refreshed = as_utc(o.get('attendance_finalized_at'))
-            if now < finished + ATTENDANCE_PUBLICATION_DELAY or refreshed is None or refreshed < finished:
+            if now < finished + publication_delay or refreshed is None or refreshed < finished:
                 continue
             self.sessions.append({
                 'id': o['id'], 'number': o['session_number'],
