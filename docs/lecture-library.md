@@ -27,7 +27,8 @@ Report aliases for the exact same meeting and actual time window are combined;
 attendance intervals are unioned across repeat joins and verified email aliases.
 The library presents one entry per module and Cairo calendar day, including
 separate calls, short recording fragments and non-overlapping parts of that day.
-Every recording and transcript part remains available in chronological order.
+Original recording/transcript references remain preserved in chronological order;
+the recording display rule below hides short setup fragments when a main recording exists.
 This presentation grouping does not establish that separate calls are the same
 meeting, and never authorizes cross-call speaker attribution. Different modules
 remain separate. Unconfirmed project archive files are grouped only with other
@@ -114,6 +115,28 @@ ongoing/future sessions and stale/partially refreshed attendance stay out of lec
 lists, detail/media routes, learner attendance and dashboard denominators. Once
 eligible, the LMS statuses/durations are displayed as stored. These are read-only
 publication checks; no source attendance, schedules or library rows are rewritten.
+
+Recording display hides clips shorter than 10 minutes only when the same lecture
+has a usable recording of at least 30 minutes. Genuine longer parts, unknown
+durations and short-only lectures remain visible. This applies to existing and
+future library and live LMS lectures. Transcript parts and all attendance/speech
+evidence remain untouched. List counts and detail buttons use the same selection.
+
+LMS media duration is read from each artifact's exact start/end. Legacy library
+durations use a minimal private index of exact provider/drive/organizer/meeting/file
+IDs, with no titles, learner records, signed URLs or transcript text. Full imports
+and hourly library sync atomically refresh that index. Unknown/missing metadata
+keeps recordings visible rather than guessing. No database migration is needed.
+For an existing installation, bootstrap it from the current approved source:
+
+```sh
+python backend/manage.py index_lecture_recordings --source /PRIVATE/current-evidence.json
+```
+
+The default output is the ignored `data/lecture-recording-durations.json`; configure
+`LECTURE_RECORDING_DURATIONS_FILE` to use another private path readable by the web
+process and writable by the sync job. Source files and original recordings are
+never edited or deleted. Index replacement is picked up on the next request.
 
 Validation: `python backend/manage.py test analytics.tests.test_lecture_library`
 and `npm --prefix frontend run build`.

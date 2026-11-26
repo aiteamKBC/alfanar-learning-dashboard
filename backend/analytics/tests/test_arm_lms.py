@@ -366,6 +366,25 @@ class ArmTests(ApiTestBase):
                 self.assertLess(asset['id'], 2**53)
                 self.assertTrue(asset['url'].startswith(f'/api/lectures/{lecture_id}/resources/'))
 
+    def test_lms_short_recordings_hidden_for_existing_and_future_occurrences(self):
+        from analytics.arm import Arm
+        value = self.media_snapshot()
+        video = value.artifacts[0]
+        video['end_datetime'] = dt.datetime(2026,11,23,12)
+        value.artifacts.append({**video,'id':'ART-SHORT','end_datetime':dt.datetime(2026,11,23,10,1)})
+        value.artifacts.append({**video,'id':'ART-LONG-PART','end_datetime':dt.datetime(2026,11,23,11)})
+        with mock.patch('analytics.api.views.load_snapshot', return_value=value):
+            detail = self.get('/api/lectures/' + Arm.lecture_id(COMPLETED))
+            self.assertEqual(detail['recordings'], 2)
+            self.assertEqual(detail['transcripts'], 1)
+            self.assertEqual(len(detail['participants']), 2)
+            self.assertEqual(self.get(f'/api/lectures?course={ARM_COURSE_ID}')['total_recordings'], 2)
+        value.occurrences[0].update(scheduled_start=dt.datetime(2026,12,1,10),scheduled_end=dt.datetime(2026,12,1,12),
+            actual_end=dt.datetime(2026,12,1,12),attendance_finalized_at=dt.datetime(2026,12,1,12,5))
+        arm = Arm(value, now=dt.datetime(2026,12,2,tzinfo=UTC))
+        self.assertEqual(arm.lectures()[0]['recordings'], 2)
+        self.assertEqual(len(value.artifacts), 4)
+
     def test_lms_recording_uses_artifact_meeting_and_existing_range_proxy(self):
         from analytics.arm import Arm
         value = self.media_snapshot()

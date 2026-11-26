@@ -20,6 +20,7 @@ from .course_labels import course_order_key
 from .lms_live import ARM_COURSE_ID, ARM_LEARNER_ID_OFFSET, ARM_TITLE, as_utc
 from .metrics import KIND_LABELS, LESSON_KIND_VALUES, _avg, _pct, defs, learner_rollup
 from .lectures.lms_media import resource_id, valid_reference
+from .lectures.recordings import select_recordings, seconds_between
 
 # LMS component types with a direct dashboard equivalent. Lecture components are reported
 # through the LMS live-session records instead; other types have no dashboard column.
@@ -134,6 +135,11 @@ class Arm:
         for row in snapshot.artifacts:
             if row['occurrence_id'] in session_ids and valid_reference(row):
                 self.artifacts[row['occurrence_id']].append(row)
+        for occurrence_id, assets in self.artifacts.items():
+            recordings = select_recordings([a for a in assets if a['artifact_type'] == 'recording'],
+                                           lambda a: seconds_between(a.get('created_datetime'), a.get('end_datetime')))
+            selected = {a['id'] for a in recordings}
+            self.artifacts[occurrence_id] = [a for a in assets if a['artifact_type'] != 'recording' or a['id'] in selected]
         self.attendance = {(a['learner_profile_id'], a['occurrence_id']): a for a in snapshot.attendance
                            if a['occurrence_id'] in session_ids and a['learner_profile_id'] in self.by_lms}
         self.present_by_session = Counter(occ for (_, occ), a in self.attendance.items()

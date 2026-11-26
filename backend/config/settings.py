@@ -147,6 +147,10 @@ def _project_path(value: str) -> Path:
     return p if p.is_absolute() else PROJECT_ROOT / p
 
 
+# Minimal private duration index for older library recordings, maintained by sync.
+LECTURE_RECORDING_DURATIONS_FILE = _project_path(os.environ.get('LECTURE_RECORDING_DURATIONS_FILE') or 'data/lecture-recording-durations.json')
+
+
 # The former combined export is comparison-only; default imports require all four module files.
 ATTENDANCE_DIRECTORY = _project_path(os.environ.get("ATTENDANCE_DIRECTORY") or "data")
 # Optional verified aliases (CSV: teams_email,learner_id). Contains emails -> keep under data/ (git-ignored).

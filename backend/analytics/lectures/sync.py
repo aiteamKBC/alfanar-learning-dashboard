@@ -17,6 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from django.utils import timezone
+from django.conf import settings
 
 from ..attendance.discovery import CALENDAR_FIELDS, calendar_time, load_config, subject_course
 from ..attendance.graph_client import GraphClient, GraphError, meeting_path
@@ -24,6 +25,7 @@ from ..management.commands.run_sync_scheduler import ProcessLock
 from .importer import CAIRO, SUBJECTS, import_source, timestamp, union
 from .library import registry
 from .media import open_recording
+from .recordings import build_duration_index
 
 
 class SyncInProgress(Exception):
@@ -303,6 +305,7 @@ def run_sync(config_path, *, dry_run=False, client=None, now=None):
         # A repeated run is idempotent and cannot delete earlier DB evidence.
         if not dry_run:
             atomic_json(source_path, data)
+            atomic_json(settings.LECTURE_RECORDING_DURATIONS_FILE, build_duration_index(data))
         with tempfile.TemporaryDirectory(prefix='lecture-candidate-', dir=source_path.parent) as folder:
             candidate = Path(folder) / 'source.json'
             atomic_json(candidate, data)
