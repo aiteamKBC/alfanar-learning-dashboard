@@ -18,6 +18,7 @@ from rest_framework.exceptions import APIException, NotFound
 
 from .. import arm as arm_module
 from .. import metrics
+from ..identity import lms_links
 from ..lms_live import ARM_COURSE_ID, ARM_LEARNER_ID_OFFSET, ARM_TITLE, LmsUnavailable, configured, load_snapshot
 from .permissions import has_dashboard_access
 from ..models import ActivityKind, Course, Enrollment, Learner
@@ -228,7 +229,7 @@ def _learner_detail(learner_id: int) -> dict:
         detail = metrics.learner_detail(learner)
         arm = _arm(required=False)
         return arm_module.merge_learner_detail(detail, arm, learner_id) if arm else detail
-    if learner_id > ARM_LEARNER_ID_OFFSET and configured():
+    if configured() and (learner_id > ARM_LEARNER_ID_OFFSET or learner_id in set(lms_links().values())):
         arm = _arm(required=True)
         if arm.standalone(learner_id):
             return arm.learner_detail(learner_id)

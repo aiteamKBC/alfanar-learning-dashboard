@@ -62,13 +62,29 @@ def _dashboard_registry():
     return learners, emails
 
 
+def _identity_links():
+    from .identity import lms_links
+    return lms_links()
+
+
+def _attendance_rank(row):
+    """Which stored LMS record represents a merged learner at one lecture.
+
+    Present beats absent beats any other status; then the longest stored attended
+    duration; then the lowest LMS learner ID. Values are shown exactly as stored.
+    """
+    status = row['attendance_status']
+    return (status == 'present', status == 'absent', row['attended_seconds'] if row['attended_seconds'] is not None else -1,
+            -row['learner_profile_id'])
+
+
 class Arm:
     """One request's view of the module. Built from a snapshot; holds nothing beyond the request."""
 
     course_id = ARM_COURSE_ID
     title = ARM_TITLE
 
-    def __init__(self, snapshot: lms_live.ArmSnapshot, registry=None, *, now=None):
+    def __init__(self, snapshot: lms_live.ArmSnapshot, registry=None, *, now=None, links=None):
         now = now if now is not None else timezone.now()
         publication_delay = dt.timedelta(minutes=settings.LMS_ATTENDANCE_PUBLICATION_DELAY_MINUTES)
         dashboard_learners, emails = registry if registry is not None else _dashboard_registry()
@@ -82,21 +98,52 @@ class Arm:
         self.catalogue = Counter(c['kind'] for c in self.components)
         quiz_component = {q['quiz_id']: q['component_id'] for q in snapshot.quiz_links}
 
-        self.learners: list[dict] = []
-        used = set()
         excluded = lms_live.EXCLUDED_LMS_LEARNER_IDS
-        for r in snapshot.roster:
-            if r['id'] in excluded:
-                continue  # also filtered in SQL; kept here so no path can reintroduce them
-            email = (r['email_normalized'] or r['email'] or '').strip().casefold()
-            sid = emails.get(email) if email else None
-            dashboard = dashboard_learners.get(sid) if sid is not None and sid not in used else None
-            learner_id = dashboard.source_id if dashboard else ARM_LEARNER_ID_OFFSET + r['id']
-            used.add(learner_id)
+        # also filtered in SQL; kept here so no path can reintroduce them
+        # LMS ID order, so the result never depends on the order rows arrive in.
+        roster = sorted((r for r in snapshot.roster if r['id'] not in excluded), key=lambda r: r['id'])
+        links = links if links is not None else _identity_links()
+
+        def email_of(r):
+            return (r['email_normalized'] or r['email'] or '').strip().casefold()
+
+        # Owner-approved identity links decide first; otherwise an exact email that uniquely
+        # identifies one dashboard identity; otherwise the LMS account's own ARM ID.
+        # Each email admits one LMS account (the lowest unlinked LMS ID); other accounts
+        # sharing that email, or a linked account's email, stay separate. Distinct emails
+        # that belong to the same owner-merged identity each admit their own account, so
+        # those accounts are shown together under the merged learner.
+        assigned = {r['id']: links[r['id']] for r in roster if r['id'] in links}
+        used = {email_of(r) for r in roster if r['id'] in assigned} - {''}
+        for r in roster:
+            if r['id'] in assigned:
+                continue
+            email = email_of(r)
+            sid = emails.get(email) if email and email not in used else None
+            dashboard = dashboard_learners.get(sid) if sid is not None else None
+            assigned[r['id']] = dashboard.source_id if dashboard else ARM_LEARNER_ID_OFFSET + r['id']
+            if dashboard:
+                used.add(email)
+        accounts = defaultdict(list)
+        for r in roster:
+            accounts[assigned[r['id']]].append(r)
+
+        # One displayed learner per identity. Its key (`lms_id`) is the primary LMS account when
+        # the identity's ID is an ARM ID, else its first account; every account maps to that key.
+        self.learners: list[dict] = []
+        self.account_key: dict[int, int] = {}
+        for learner_id, rows in accounts.items():
+            dashboard = dashboard_learners.get(learner_id)
+            lead = next((r for r in rows if ARM_LEARNER_ID_OFFSET + r['id'] == learner_id), rows[0])
+            for r in rows:
+                self.account_key[r['id']] = lead['id']
             self.learners.append({
-                'lms_id': r['id'], 'learner_id': learner_id, 'dashboard': dashboard is not None,
-                'name': dashboard.name if dashboard else ((r['full_name'] or '').strip() or f'Learner {learner_id}'),
-                'email': dashboard.email if dashboard else (r['email'] or ''),
+                'lms_id': lead['id'], 'lms_ids': [r['id'] for r in rows], 'learner_id': learner_id,
+                'dashboard': dashboard is not None,
+                'name': dashboard.name if dashboard else ((lead['full_name'] or '').strip() or f'Learner {learner_id}'),
+                'email': dashboard.email if dashboard else (lead['email'] or ''),
+                'accounts': [{'lms_id': r['id'], 'name': (r['full_name'] or '').strip() or f'Learner {ARM_LEARNER_ID_OFFSET + r["id"]}'}
+                             for r in rows],
             })
         self.by_lms = {x['lms_id']: x for x in self.learners}
         self.by_learner_id = {x['learner_id']: x for x in self.learners}
@@ -139,15 +186,25 @@ class Arm:
                                            lambda a: seconds_between(a.get('created_datetime'), a.get('end_datetime')))
             selected = {a['id'] for a in recordings}
             self.artifacts[occurrence_id] = [a for a in assets if a['artifact_type'] != 'recording' or a['id'] in selected]
-        self.attendance = {(a['learner_profile_id'], a['occurrence_id']): a for a in snapshot.attendance
-                           if a['occurrence_id'] in session_ids and a['learner_profile_id'] in self.by_lms}
+        # One LMS record per displayed learner and lecture. When merged accounts each have a
+        # record, one stored record is shown as-is (never summed): see `_attendance_rank`.
+        self.attendance = {}
+        for a in snapshot.attendance:
+            key = self.account_key.get(a['learner_profile_id'])
+            if a['occurrence_id'] not in session_ids or key is None:
+                continue
+            current = self.attendance.get((key, a['occurrence_id']))
+            if current is None or _attendance_rank(a) > _attendance_rank(current):
+                self.attendance[(key, a['occurrence_id'])] = a
         self.present_by_session = Counter(occ for (_, occ), a in self.attendance.items()
                                           if a['attendance_status'] == 'present')
 
         self.stats = {x['lms_id']: {'done': {}, 'quiz': defaultdict(list), 'subs': defaultdict(list),
                                     'has_activity': False, 'last_activity': None} for x in self.learners}
+        # Merged accounts pool their records: distinct activities count once (latest completion
+        # time kept), quiz attempts and submissions are the union of the accounts' records.
         for e in snapshot.entries:
-            s = self.stats.get(e['learner_id'])
+            s = self.stats.get(self.account_key.get(e['learner_id']))
             component = next((ref for ref in (e['component_ref'], e['curriculum_component_ref'])
                               if ref in self.component_by_id), None) or quiz_component.get(e['quiz_ref'])
             if s is None or component not in self.component_by_id:
@@ -161,7 +218,7 @@ class Arm:
             elif kind in LESSON_KIND_VALUES and e['accepted'] is True:
                 s['done'][component] = _latest(s['done'].get(component), when)
         for sub in snapshot.submissions:
-            s = self.stats.get(sub['learner_id'])
+            s = self.stats.get(self.account_key.get(sub['learner_id']))
             component = self.component_by_id.get(sub['activity_id'])
             if s is None or component is None or component['kind'] != 'assignment':
                 continue
