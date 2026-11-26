@@ -1,4 +1,4 @@
-"""Hide short setup fragments when a substantial lecture recording exists.
+"""Hide every recording whose verified duration is shorter than ten minutes.
 
 Selection affects presentation only. Original media, transcripts, attendance and
 speaker evidence remain untouched. Unknown durations are never guessed.
@@ -12,7 +12,6 @@ from pathlib import Path
 from django.conf import settings
 
 SHORT_RECORDING_SECONDS = 10 * 60
-MAIN_RECORDING_SECONDS = 30 * 60
 
 
 def seconds_between(start, end):
@@ -25,11 +24,8 @@ def seconds_between(start, end):
         return None
 
 
-def select_recordings(rows, duration, available=lambda row: True):
-    rows = list(rows)
+def select_recordings(rows, duration):
     lengths = [(row, duration(row)) for row in rows]
-    if not any(length is not None and length >= MAIN_RECORDING_SECONDS and available(row) for row, length in lengths):
-        return rows
     return [row for row, length in lengths if length is None or length >= SHORT_RECORDING_SECONDS]
 
 

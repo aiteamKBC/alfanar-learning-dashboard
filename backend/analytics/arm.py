@@ -575,6 +575,8 @@ class Arm:
     def lectures(self, start=None, end=None) -> list[dict]:
         rows = []
         for s in self.sessions:
+            if self.learners and not self.present_by_session[s['id']]:
+                continue
             if (start and (s['date'] is None or s['date'] < start)) or (end and (s['date'] is None or s['date'] > end)):
                 continue
             records = [self.attendance.get((x['lms_id'], s['id'])) for x in self.learners]
@@ -594,10 +596,12 @@ class Arm:
         return rows
 
     def lecture_detail(self, lecture_id: str) -> dict | None:
+        summary = next((r for r in self.lectures() if r['id'] == str(lecture_id)), None)
+        if summary is None:
+            return None
         session = next((s for s in self.sessions if self.lecture_id(s['id']) == str(lecture_id)), None)
         if session is None:
             return None
-        summary = next(r for r in self.lectures() if r['id'] == str(lecture_id))
         participants = []
         for x in sorted(self.learners, key=lambda x: (x['name'].casefold(), x['learner_id'])):
             a = self.attendance.get((x['lms_id'], session['id']))
@@ -619,7 +623,7 @@ class Arm:
 
     def lecture_resource(self, lecture_id, asset_id):
         session = next((s for s in self.sessions if self.lecture_id(s['id']) == str(lecture_id)), None)
-        if session is None:
+        if session is None or (self.learners and not self.present_by_session[session['id']]):
             return None
         found = [row for row in self.artifacts[session['id']] if resource_id(row['id']) == asset_id]
         return found[0] if len(found) == 1 else None

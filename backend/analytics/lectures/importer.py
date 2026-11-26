@@ -19,6 +19,7 @@ from lecture_library.models import LectureCapture, LectureLearner, LectureResour
 from config.database_router import LIBRARY_ALIAS
 from .library import registry, require_database
 from .daily import attendance_timing, combine_days
+from .attendance import MIN_PRESENT_SECONDS
 
 SUBJECTS = {
     "Level 7 Diploma in Project Management": 83334,
@@ -432,7 +433,7 @@ def import_source(path, speaker_bindings=None, *, incremental_since=None, subjec
                     row.update(first_join=first or row["first_join"], last_leave=last or row["last_leave"], duration_seconds=duration)
                     if intervals:
                         row["timing_source"] = "Teams attendance intervals"
-                    if duration >= 1800:
+                    if duration >= MIN_PRESENT_SECONDS:
                         row["attendance"] = "present"
                     elif intervals and row["attendance"] not in {"present", "absent"}:
                         row["attendance"] = "review"

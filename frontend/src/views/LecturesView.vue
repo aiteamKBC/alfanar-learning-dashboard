@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api, qs } from '@/api/client'
+import { api, ApiError, qs } from '@/api/client'
 import { useAsync } from '@/api/useAsync'
 import type { FiltersResponse } from '@/api/types'
 import type { LectureDetail, LectureList, LectureParticipant } from '@/api/lectures'
@@ -30,7 +30,19 @@ const activeId = computed(() => {
   const rows = list.data.value?.results ?? []
   return q('lecture') || rows[0]?.id || ''
 })
-const detail = useAsync<LectureDetail | null>(() => activeId.value ? api.get<LectureDetail>(`lectures/${activeId.value}`) : Promise.resolve(null), [activeId])
+const detail = useAsync<LectureDetail | null>(async () => {
+  const id = activeId.value
+  if (!id) return null
+  try {
+    return await api.get<LectureDetail>(`lectures/${id}`)
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404 && q('lecture') === id) {
+      updateQuery({ lecture: undefined })
+      return null
+    }
+    throw error
+  }
+}, [activeId])
 function select(id: string) { updateQuery({ lecture: id }) }
 const participantSearch = ref('')
 const participantAttendance = ref('')
