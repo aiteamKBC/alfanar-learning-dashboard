@@ -2,6 +2,11 @@
 
 LMS tables are a rebuildable active projection. Original snapshots, memberships,
 operation history and attendance source rows are never deleted by owner actions.
+
+Advanced Research Methods learners are read live from the LMS and are never copied
+here. A group may also link LMS learner accounts (`LmsIdentityMembership`, LMS learner
+IDs only); their original identity ID is `ARM_LEARNER_ID_OFFSET + LMS learner ID`.
+The LMS is only ever read (`lms_live`), never written.
 """
 from __future__ import annotations
 
@@ -15,12 +20,36 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 
+from .lms_live import ARM_COURSE_ID, ARM_LEARNER_ID_OFFSET
 from .models import (IdentityState, IdentitySourceSnapshot, IdentityGroup, IdentityMembership,
-                     OriginalLearner, IdentityOperation, Enrollment, LectureTiming, SessionAttendance)
+                     LmsIdentityMembership, OriginalLearner, IdentityOperation, Enrollment, LectureTiming,
+                     SessionAttendance)
 
 
 class IdentityError(ValueError):
     pass
+
+
+def is_arm_id(uid) -> bool:
+    return uid > ARM_LEARNER_ID_OFFSET
+
+
+def lms_links() -> dict[int, int]:
+    """LMS learner ID -> displayed learner ID, for owner-approved links in active groups."""
+    return dict(LmsIdentityMembership.objects.filter(group__active=True)
+                .values_list('lms_learner_id', 'group__primary_source_id'))
+
+
+def live_arm():
+    """This request's live, read-only ARM view, or None if the LMS is not configured or unavailable."""
+    from . import lms_live
+    if not lms_live.configured():
+        return None
+    from .arm import Arm
+    try:
+        return Arm(lms_live.load_snapshot())
+    except lms_live.LmsUnavailable:
+        return None
 
 
 def state():
@@ -49,7 +78,8 @@ def capture_source(tables):
     raw = normalize(tables)
     snapshot, _ = IdentitySourceSnapshot.objects.get_or_create(sha256=digest(tables), defaults={'tables': tables})
     active_groups = IdentityGroup.objects.filter(active=True)
-    if any(g.primary_source_id not in raw.learners for g in active_groups):
+    # An ARM primary is an LMS account, never part of this source.
+    if any(g.primary_source_id not in raw.learners and not is_arm_id(g.primary_source_id) for g in active_groups):
         raise IdentityError('An approved primary identity disappeared from the source. Undo that merge before retrying sync.')
     OriginalLearner.objects.exclude(source_id__in=raw.learners).update(in_source=False)
     for uid, item in raw.learners.items():
@@ -103,27 +133,92 @@ def sync_projection(tables):
     return projection(snapshot), rebuild(snapshot)
 
 
-def members(selected, *, archived=False):
-    originals = list(OriginalLearner.objects.select_related('group').all())
+def _display_id(original):
+    return original.group.primary_source_id if original.group_id and original.group.active else original.source_id
+
+
+def lms_accounts(arm):
+    """Displayed learner ID -> {LMS learner ID: account} for linked and live ARM accounts.
+
+    Links come from this database; live accounts and names come from the read-only LMS
+    view `arm` (None when unavailable). Names are only returned, never stored.
+    """
+    accounts = defaultdict(dict)
+    for link in LmsIdentityMembership.objects.filter(group__active=True).select_related('group'):
+        accounts[link.group.primary_source_id][link.lms_learner_id] = {
+            'group_id': link.group_id, 'name': None, 'in_source': arm is None}
+    if arm is not None:
+        for learner in arm.learners:
+            for account in learner['accounts']:
+                found = accounts[learner['learner_id']].setdefault(account['lms_id'], {'group_id': None})
+                found.update(name=account['name'], in_source=True)
+    return accounts
+
+
+def members(selected, *, archived=False, arm=None):
+    """The original identities behind the selected displayed learners.
+
+    Returns (dashboard originals, {LMS learner ID: account}). A displayed learner's LMS
+    accounts are those linked to its group plus those the live LMS view shows in its row.
+    """
+    from . import lms_live
     visible = defaultdict(list)
-    for r in originals:
-        if r.archived != archived:
-            continue
-        visible[r.group.primary_source_id if r.group_id and r.group.active else r.source_id].append(r)
+    for r in OriginalLearner.objects.select_related('group').all():
+        if r.archived == archived:
+            visible[_display_id(r)].append(r)
     available = {uid for uid, rows in visible.items() if any(r.in_source for r in rows)}
-    if not selected or set(selected) - available:
+    accounts = defaultdict(dict) if archived else lms_accounts(arm)
+    available |= {uid for uid, found in accounts.items() if any(a['in_source'] for a in found.values())}
+    missing = set(selected or ()) - available
+    if not selected or missing:
+        if arm is None and not archived and any(is_arm_id(uid) for uid in missing) and lms_live.configured():
+            raise IdentityError('The LMS is currently unavailable, so Advanced Research Methods learners '
+                                'cannot be checked. Try again.')
         raise IdentityError('A selected learner is no longer available. Refresh the selection.')
-    return [r for uid in sorted(set(selected)) for r in visible[uid]]
+    chosen = sorted(set(selected))
+    return ([r for uid in chosen for r in visible[uid]],
+            {lms_id: account for uid in chosen for lms_id, account in accounts[uid].items()})
+
+
+def _resolve(kind, ids, arm):
+    """(dashboard originals, LMS accounts, group) an action applies to."""
+    rows, accounts = members(ids, archived=kind == 'restore', arm=arm)
+    group = None
+    if kind == 'unmerge':
+        # Only accounts linked to the group are undone; an account shown in the row by its
+        # existing email match is not part of the group and is left as it is.
+        accounts = {lms_id: a for lms_id, a in accounts.items() if a['group_id']}
+        groups = {r.group_id for r in rows} | {a['group_id'] for a in accounts.values()}
+        if len(ids) != 1 or len(groups) != 1 or None in groups:
+            raise IdentityError('Choose one active merged group to undo.')
+        group = IdentityGroup.objects.get(pk=next(iter(groups)))
+    elif kind in ('archive', 'restore'):
+        if set(ids) - {_display_id(r) for r in rows}:
+            raise IdentityError('Advanced Research Methods learners are read live from the LMS and cannot be '
+                                'deleted or restored here.')
+        accounts = {}
+    return rows, accounts, group
+
+
+def _source_ids(rows, accounts):
+    return sorted({r.source_id for r in rows} | {ARM_LEARNER_ID_OFFSET + lms_id for lms_id in accounts})
 
 
 def registry():
     s = state()
+    originals = [{'source_id': r.source_id, 'name': r.name, 'email': r.email,
+        'modules': r.enrollments, 'archived': r.archived, 'in_source': r.in_source,
+        'primary_id': _display_id(r), 'group_id': str(r.group_id) if r.group_id and r.group.active else None,
+        'source': 'dashboard'}
+        for r in OriginalLearner.objects.select_related('group').order_by('source_id')]
+    # ARM accounts: names are read live from the LMS for this response only.
+    for primary_id, found in lms_accounts(live_arm()).items():
+        for lms_id, a in sorted(found.items()):
+            originals.append({'source_id': ARM_LEARNER_ID_OFFSET + lms_id, 'name': a['name'] or f'LMS learner {lms_id}',
+                'email': '', 'modules': [ARM_COURSE_ID], 'archived': False, 'in_source': a['in_source'],
+                'primary_id': primary_id, 'group_id': str(a['group_id']) if a['group_id'] else None, 'source': 'lms'})
     return {'revision': s.revision if s else 0, 'ready': bool(s and s.restored),
-        'originals': [{'source_id': r.source_id, 'name': r.name, 'email': r.email,
-            'modules': r.enrollments, 'archived': r.archived, 'in_source': r.in_source,
-            'primary_id': r.group.primary_source_id if r.group_id and r.group.active else r.source_id,
-            'group_id': str(r.group_id) if r.group_id and r.group.active else None}
-            for r in OriginalLearner.objects.select_related('group').order_by('source_id')],
+        'originals': originals,
         'history': [{'id': str(o.pk), 'kind': o.kind, 'at': o.applied_at, 'revision': o.revision,
             'result': o.result, 'primary_id': o.request.get('primary_id'),
             'source_ids': o.result.get('source_ids', [])} for o in IdentityOperation.objects.filter(applied_at__isnull=False).order_by('-applied_at')[:100]]}
@@ -142,13 +237,13 @@ def preview(actor, request):
     ids = request.get('learner_ids')
     if not isinstance(ids, list) or not ids or any(type(i) is not int for i in ids) or len(ids) != len(set(ids)):
         raise IdentityError('Select unique learner source IDs.')
-    rows = members(ids, archived=kind == 'restore')
+    rows, accounts, group = _resolve(kind, ids, live_arm() if kind != 'restore' else None)
     originals = {r.source_id for r in rows}
     primary = request.get('primary_id')
-    if kind == 'merge' and (len(ids) < 2 or type(primary) is not int or primary not in {r.source_id for r in rows if r.in_source}):
+    candidates = {r.source_id for r in rows if r.in_source} | {
+        ARM_LEARNER_ID_OFFSET + lms_id for lms_id, a in accounts.items() if a['in_source']}
+    if kind == 'merge' and (len(ids) < 2 or type(primary) is not int or primary not in candidates):
         raise IdentityError('Choose at least two learners and a primary original identity.')
-    if kind == 'unmerge' and (len(ids) != 1 or len({r.group_id for r in rows}) != 1 or not rows[0].group_id):
-        raise IdentityError('Choose one active merged group to undo.')
     mapping, archived = policy()
     if kind == 'merge':
         mapping.update({uid: primary for uid in originals})
@@ -158,17 +253,19 @@ def preview(actor, request):
         archived -= originals
     else:
         for uid in originals: mapping.pop(uid, None)
-        for parent in IdentityGroup.objects.filter(pk__in=rows[0].group.parent_groups):
+        for parent in IdentityGroup.objects.filter(pk__in=group.parent_groups):
             mapping.update({uid: parent.primary_source_id for uid in parent.memberships.values_list('original_id', flat=True)})
-    from .importer.normalize import normalize
     proposed = projection(s.snapshot, identity_policy=(mapping, archived))
+    lms_ids = sorted(accounts)
+    # LMS names are shown in the response but never stored with the operation.
+    lms_originals = [{'source_id': ARM_LEARNER_ID_OFFSET + lms_id, 'modules': [ARM_COURSE_ID]} for lms_id in lms_ids]
     details = {'kind': kind, 'originals': [{'source_id': r.source_id, 'name': r.name,
-        'modules': r.enrollments} for r in rows], 'primary_id': primary,
+        'modules': r.enrollments} for r in rows] + lms_originals, 'primary_id': primary,
         'resulting_dashboard': proposed.counts(),
-        'affected_source_enrollments': sum(len(r.enrollments) for r in rows),
+        'affected_source_enrollments': sum(len(r.enrollments) for r in rows) + len(lms_ids),
         'retained_timing_records': LectureTiming.objects.filter(import_run__active=True, learner_source_id__in=originals).count(),
         'retained_matrix_records': SessionAttendance.objects.filter(learner_source_id__in=originals).count(),
-        'rules': 'Original evidence is retained. Shared LMS progress uses the highest source percentage, never a sum or average. Distinct activity IDs are counted once. Timing uses the union of intervals. Delete archives the selected original identities.'}
+        'rules': 'Original evidence is retained. Shared LMS progress uses the highest source percentage, never a sum or average. Distinct activity IDs are counted once. Timing uses the union of intervals. Advanced Research Methods data stays live in the LMS: for each lecture one stored LMS attendance record is shown (present, then absent, then the longest duration), never a sum. Delete archives the selected original identities.'}
     from .identity_evidence import projected_timing, projected_matrix
     timing = projected_timing(LectureTiming.objects.filter(import_run__active=True, status='verified'), identity_policy=(mapping, archived))
     matrix = projected_matrix(SessionAttendance.objects.values('id', 'learner_source_id', 'session_id', 'attended',
@@ -183,10 +280,15 @@ def preview(actor, request):
         'timing_pairs': sum(c == cid and (uid, c) in proposed.enrollments for uid, c, day in timing),
         'timing_seconds': sum(r.duration_microseconds // 1_000_000 for (uid, c, day), r in timing.items() if c == cid and (uid, c) in proposed.enrollments),
     } for cid in sorted({cid for r in rows for cid in r.enrollments})]
+    if lms_ids:
+        details['module_counts'].append({'course_id': ARM_COURSE_ID, 'lms_accounts': len(lms_ids)})
     details['matrix_conflicts_for_review'] = sum(r['identity_conflict'] for r in matrix.values())
     op = IdentityOperation.objects.create(actor=actor, kind=kind, revision=s.revision,
-        snapshot_sha256=s.snapshot.sha256, request={'kind': kind, 'learner_ids': ids, 'primary_id': primary}, preview=details)
-    return {'token': str(op.pk), **details}
+        snapshot_sha256=s.snapshot.sha256, preview=details,
+        request={'kind': kind, 'learner_ids': ids, 'primary_id': primary, 'source_ids': _source_ids(rows, accounts)})
+    names = {ARM_LEARNER_ID_OFFSET + lms_id: accounts[lms_id]['name'] or f'LMS learner {lms_id}' for lms_id in lms_ids}
+    shown = [{**o, 'name': names[o['source_id']]} if o['source_id'] in names else o for o in details['originals']]
+    return {'token': str(op.pk), **details, 'originals': shown}
 
 
 @transaction.atomic
@@ -201,16 +303,23 @@ def confirm(actor, token):
     if not s or not s.restored or s.revision != op.revision or s.snapshot.sha256 != op.snapshot_sha256 or op.created_at < timezone.now() - timedelta(minutes=15):
         raise IdentityError('Preview expired or source data changed. Preview again.')
     lock_revision(op.revision)
-    rows = members(op.request['learner_ids'], archived=op.kind == 'restore')
+    rows, accounts, group = _resolve(op.kind, op.request['learner_ids'], live_arm() if op.kind != 'restore' else None)
+    source_ids = _source_ids(rows, accounts)
+    if 'source_ids' in op.request and source_ids != op.request['source_ids']:
+        # e.g. the live LMS roster changed, or could not be read, since the preview.
+        raise IdentityError('Preview expired or source data changed. Preview again.')
     ids = [r.source_id for r in rows]
-    old_groups = {str(r.group_id) for r in rows if r.group_id}
     if op.kind == 'merge':
+        old_groups = {str(r.group_id) for r in rows if r.group_id} | {
+            str(a['group_id']) for a in accounts.values() if a['group_id']}
         group = IdentityGroup.objects.create(primary_source_id=op.request['primary_id'], parent_groups=sorted(old_groups))
         IdentityMembership.objects.bulk_create([IdentityMembership(group=group, original=r) for r in rows])
+        LmsIdentityMembership.objects.bulk_create([LmsIdentityMembership(group=group, lms_learner_id=lms_id)
+                                                   for lms_id in sorted(accounts)])
         IdentityGroup.objects.filter(pk__in=old_groups).update(active=False)
         OriginalLearner.objects.filter(pk__in=ids).update(group=group)
     elif op.kind == 'unmerge':
-        group = rows[0].group
+        # Links are kept as history and stop applying with their group; parent links apply again.
         group.active = False
         group.save(update_fields=['active'])
         OriginalLearner.objects.filter(pk__in=ids).update(group=None)
@@ -222,7 +331,7 @@ def confirm(actor, token):
         OriginalLearner.objects.filter(pk__in=ids).update(archived=op.kind == 'archive')
     rebuild(s.snapshot)
     op.applied_at = timezone.now()
-    op.result = {'operation_id': str(op.pk), 'kind': op.kind, 'source_ids': sorted(ids), 'revision': op.revision + 1,
+    op.result = {'operation_id': str(op.pk), 'kind': op.kind, 'source_ids': source_ids, 'revision': op.revision + 1,
                  'learners': projection(s.snapshot).counts()['learners']}
     op.save(update_fields=['applied_at', 'result'])
     return op.result

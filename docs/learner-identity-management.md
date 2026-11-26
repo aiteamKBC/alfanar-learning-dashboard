@@ -52,6 +52,44 @@ held identity/calendar evidence; those holds need their own evidence review. The
 with the full prior timing snapshot. Current totals are recomputed for the restored
 identities and therefore differ from the former consolidated totals.
 
+## Advanced Research Methods (live LMS) learners
+
+ARM learners are read live from the LMS and are never copied into the dashboard
+database. Their original identity ID is `2000000 + LMS learner ID` (for example LMS
+learner 1275 is `2001275`). Merge and Unmerge accept them in any combination with
+dashboard learners, and either source may be the primary.
+
+- Persistence: a confirmed merge stores only the LMS learner IDs, as
+  `LmsIdentityMembership` rows on the new identity group (migration
+  `analytics.0013_lms_identity_membership`). A link applies while its group is
+  active. Unmerge deactivates the group; the links stay as history. LMS names, emails,
+  attendance, progress, quizzes and submissions are never stored. Previews and history
+  store IDs only; names are read live when shown.
+- Display: owner links decide first, then an exact email that belongs to exactly one
+  dashboard identity, then the account's own ARM ID. All accounts of one identity are
+  shown as one learner under the primary's ID in every view.
+- Existing owner merges: each member's email can bring in its own LMS account. If
+  756 + 1055 are merged, the account with 756's email and the account with 1055's
+  email both show under 756, with no new merge stored. Each email admits one LMS
+  account, the lowest unlinked LMS ID. Other accounts with the same email, or with
+  the email of an owner-linked account, stay separate. The result does not depend on
+  LMS row order.
+- An ARM primary with dashboard members: the dashboard records are projected under the
+  ARM ID and keep the dashboard name, because LMS names are not stored. An ARM-only
+  group shows the primary account's live LMS name.
+- Combined ARM figures: a distinct activity is counted once; quiz attempts and
+  submissions are the union of the accounts' records. For each lecture, one stored
+  LMS attendance record is shown as-is: present before absent, then the longest
+  attended duration, then the lowest LMS learner ID. Durations are never summed
+  across accounts.
+- Merging a row also links any LMS account shown in it by email match, so it stays
+  with the merged learner. After Unmerge that account goes back to its email match.
+- Preview and confirm read the LMS roster (read-only). If the LMS cannot be read, an
+  action involving ARM learners is refused. If the accounts change between preview
+  and confirm, the preview must be repeated. Delete/Restore apply to dashboard records
+  only; ARM learners cannot be archived. Excluded LMS learners (272, 593, 1213) cannot
+  be selected.
+
 ## API and concurrency
 
 - `GET /api/identities`: owner registry and applied operation history.
