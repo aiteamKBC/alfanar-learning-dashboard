@@ -8,6 +8,7 @@ from ..models import Course, Enrollment, Learner, LearnerIdentity
 from lecture_library.models import LectureCapture, LectureResource
 from .recordings import duration_index, stored_duration, select_recordings
 from .attendance import attendance_status
+from .transcripts import select_transcript, transcript_duration
 
 
 def require_database():
@@ -65,7 +66,20 @@ def visible_resources(lecture):
     index = duration_index()
     selected = {r.pk for r in select_recordings([r for r in resources if r.kind == 'recording'],
                 lambda r: stored_duration(r, index))}
-    return [r for r in resources if r.kind != 'recording' or r.pk in selected]
+    transcripts = [r for r in resources if r.kind == 'transcript']
+    if len(transcripts) > 1:
+        transcript_index = duration_index('transcript')
+        lengths = {r.pk: stored_duration(r, transcript_index) for r in transcripts}
+        # Old installations need no reimport: use their saved VTT timings.
+        missing = [r.pk for r in transcripts if lengths[r.pk] is None]
+        content = {pk: (vtt, text) for pk, vtt, text in LectureResource.objects.filter(pk__in=missing)
+                   .values_list('pk', 'vtt_content', 'text_content')} if missing else {}
+        for pk, (vtt, _) in content.items():
+            lengths[pk] = transcript_duration(vtt)
+        transcripts = select_transcript(transcripts, lambda r: lengths[r.pk], available=lambda r: r.readable,
+                                       content_size=lambda r: len(content.get(r.pk, ('', ''))[1]))
+    selected.update(r.pk for r in transcripts)
+    return [r for r in resources if r.pk in selected]
 
 
 def recording_counts(queryset):

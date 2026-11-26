@@ -411,6 +411,27 @@ class ArmTests(ApiTestBase):
         self.assertEqual(arm.lectures()[0]['recordings'], 2)
         self.assertEqual(len(value.artifacts), 4)
 
+    def test_lms_transcripts_select_longest_per_occurrence_without_changing_source_or_attendance(self):
+        from analytics.arm import Arm
+        from analytics.lectures.lms_media import resource_id
+        value = self.media_snapshot()
+        text = value.artifacts[1]
+        text['end_datetime'] = dt.datetime(2026, 11, 23, 10, 1)
+        value.artifacts += [{**text, 'id': 'ART-TEXT-MAIN', 'graph_artifact_id': 'main-transcript',
+                             'end_datetime': dt.datetime(2026, 11, 23, 12)},
+                            {**text, 'id': 'ART-TEXT-SECOND', 'end_datetime': dt.datetime(2026, 11, 23, 10, 2)}]
+        lecture_id = Arm.lecture_id(COMPLETED)
+        before = self.get('/api/lectures/' + lecture_id)['participants']
+        with mock.patch('analytics.api.views.load_snapshot', return_value=value):
+            detail = self.get('/api/lectures/' + lecture_id)
+            self.assertEqual(detail['participants'], before)
+            self.assertEqual((detail['recordings'], detail['transcripts']), (1, 1))
+            self.assertEqual([r['id'] for r in detail['resources'] if r['kind'] == 'transcript'],
+                             [resource_id('ART-TEXT-MAIN')])
+            self.assertEqual(self.get(f'/api/lectures?course={ARM_COURSE_ID}')['results'][0]['transcripts'], 1)
+            self.assertEqual(next(r for r in self.get('/api/lectures')['results'] if r['id'] == lecture_id)['transcripts'], 1)
+        self.assertEqual(len(value.artifacts), 4)
+
     def test_lms_recording_uses_artifact_meeting_and_existing_range_proxy(self):
         from analytics.arm import Arm
         value = self.media_snapshot()

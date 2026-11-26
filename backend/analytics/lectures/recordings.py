@@ -36,35 +36,38 @@ def source_key(provider, drive_id, owner, meeting, source_id):
 def build_duration_index(source):
     """Minimal private index from exact source references, never titles/dates."""
     durations = {}
+    transcript_durations = {}
     for series in source.get('series', []):
-        for asset in series.get('recordings', []):
-            length = seconds_between(asset.get('createdDateTime'), asset.get('endDateTime'))
-            if length is not None:
-                key = source_key(asset.get('provider', 'teams'), asset.get('drive_id', ''),
-                                 series['organizer_id'], series['meeting_id'], asset['id'])
-                durations[key] = length
-    return {'version': 1, 'durations': durations}
+        for kind, target in [('recordings', durations), ('transcripts', transcript_durations)]:
+            for asset in series.get(kind, []):
+                length = seconds_between(asset.get('createdDateTime'), asset.get('endDateTime'))
+                if length is not None:
+                    key = source_key(asset.get('provider', 'teams'), asset.get('drive_id', ''),
+                                     series['organizer_id'], series['meeting_id'], asset['id'])
+                    target[key] = length
+    return {'version': 1, 'durations': durations, 'transcript_durations': transcript_durations}
 
 
 @lru_cache(maxsize=4)
-def _read_index(path, mtime, size):
+def _read_index(path, mtime, size, section):
     try:
         value = json.loads(Path(path).read_text(encoding='utf8'))
-        if value.get('version') != 1 or not isinstance(value.get('durations'), dict):
+        if value.get('version') != 1 or not isinstance(value.get(section), dict):
             return {}
-        return {k: float(v) for k, v in value['durations'].items()
+        return {k: float(v) for k, v in value[section].items()
                 if isinstance(v, (float, int)) and not isinstance(v, bool) and math.isfinite(v) and v > 0}
     except (OSError, ValueError, TypeError, AttributeError):
         return {}
 
 
-def duration_index():
+def duration_index(kind='recording'):
     path = Path(settings.LECTURE_RECORDING_DURATIONS_FILE)
     try:
         stat = path.stat()
     except OSError:
         return {}
-    return _read_index(str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+    section = 'transcript_durations' if kind == 'transcript' else 'durations'
+    return _read_index(str(path.resolve()), stat.st_mtime_ns, stat.st_size, section)
 
 
 def stored_duration(asset, index):
