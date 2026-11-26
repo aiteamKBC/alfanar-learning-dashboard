@@ -385,7 +385,7 @@ class LectureLibraryTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content.decode(), "Private source transcript")
 
-    def test_recordings_are_not_hidden_by_staff_only_or_missing_attendance(self):
+    def test_media_only_cohort_day_is_hidden_without_deleting_evidence(self):
         source = self.source()
         source["previous"]["attendance"]["reports"] = []
         source["attendance_records"] = {}
@@ -393,10 +393,75 @@ class LectureLibraryTests(TestCase):
         self.assertEqual(result["recording_sessions"], 1)
         self.assertEqual(self.lecture().source_label, "Recording session")
         self.assertEqual(self.lecture().resources.count(), 2)
+        self.assertEqual(self.client.get(self.url()).status_code, 404)
+        self.assertEqual(self.client.get('/api/lectures').json()['count'], 0)
+        self.assertEqual(self.lecture().resources.count(), 2)
+        # An attendance refresh can make the same day visible without reimporting media.
+        self.load()
+        self.assertEqual(self.client.get(self.url()).json()['present'], 5)
+
+    def test_zero_present_days_are_hidden_before_pagination_and_from_direct_routes(self):
+        self.load()
+        lecture = self.lecture()
+        asset = lecture.resources.get(kind='transcript')
+        for status in ('absent', 'not_available', 'review'):
+            with self.subTest(status=status):
+                LectureLearner.objects.filter(lecture=lecture).update(attendance=status, duration_seconds=60)
+                listing = self.client.get('/api/lectures?page_size=1').json()
+                self.assertEqual((listing['count'], listing['total_recordings'], listing['results']), (0, 0, []))
+                self.assertEqual(self.client.get(self.url()).status_code, 404)
+                self.assertEqual(self.client.get(f'{self.url()}/resources/{asset.pk}').status_code, 404)
+        self.assertEqual(lecture.observations.count(), 5)
+        self.assertEqual(lecture.resources.count(), 2)
+        # One confirmed Present is enough; all other stored statuses stay intact.
+        lecture.observations.filter(learner_source_id=100).update(attendance='present')
         body = self.client.get(self.url()).json()
-        self.assertTrue(body["recording_session"])
-        self.assertEqual(len(body["participants"]), 5)
-        self.assertTrue(all(x["attendance"] == "not_available" for x in body["participants"]))
+        self.assertEqual(body['present'], 1)
+        self.assertEqual(sum(x['attendance'] == 'review' for x in body['participants']), 4)
+
+    def test_out_of_cohort_or_ambiguous_presence_cannot_publish_a_day(self):
+        self.load()
+        lecture = self.lecture()
+        lecture.observations.exclude(learner_source_id=100).update(attendance='absent', duration_seconds=0)
+        LearnerIdentity.objects.create(source_id=801, canonical_source_id=900,
+                                       email=self.roster[0].email, name='Shared')
+        LearnerIdentity.objects.filter(source_id=999).delete()
+        LectureLearner.objects.create(lecture=lecture, learner_source_id=900,
+                                      source_emails=[self.other.email], attendance='present')
+        self.assertEqual(self.client.get('/api/lectures').json()['count'], 0)
+
+    def test_existing_short_visits_use_ten_minutes_without_rewriting_stored_rows(self):
+        self.load()
+        lecture = self.lecture()
+        lecture.observations.all().update(attendance='review', duration_seconds=599.999)
+        self.assertEqual(self.client.get('/api/lectures').json()['count'], 0)
+        row = lecture.observations.get(learner_source_id=100)
+        row.duration_seconds = 600
+        row.save(update_fields=['duration_seconds'])
+        body = self.client.get(self.url()).json()
+        self.assertEqual(body['present'], 1)
+        self.assertEqual(next(x for x in body['participants'] if x['learner_id'] == 100)['attendance'], 'present')
+        self.assertEqual(sum(x['attendance'] == 'review' for x in body['participants']), 4)
+        row.refresh_from_db()
+        self.assertEqual(row.attendance, 'review')
+        self.assertEqual(self.client.get('/api/lectures').json()['count'], 1)
+
+    def test_import_uses_ten_minute_boundary_and_unions_repeat_joins(self):
+        for duration, status in ((599.999, 'review'), (600, 'present'), (601, 'present')):
+            with self.subTest(duration=duration):
+                source = self.source()
+                records = [self.record(x.email, f'identity-{i}') for i, x in enumerate(self.roster)]
+                end = (dt.datetime.fromisoformat(self.start) + dt.timedelta(seconds=duration)).isoformat()
+                records[0]['attendanceIntervals'] = [
+                    {'joinDateTime': self.start, 'leaveDateTime': end},
+                    {'joinDateTime': self.start, 'leaveDateTime': end},
+                ]
+                source['attendance_records']['meeting|report'] = records
+                source['previous']['attendance']['reports'][0]['expected'] = len(records)
+                self.load(source)
+                row = LectureLearner.objects.get(learner_source_id=100)
+                self.assertAlmostEqual(row.duration_seconds, duration)
+                self.assertEqual(row.attendance, status)
 
     def test_recording_parts_of_one_call_share_a_stable_session(self):
         source = self.source()

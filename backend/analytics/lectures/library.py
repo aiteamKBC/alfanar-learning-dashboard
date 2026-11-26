@@ -7,6 +7,7 @@ from rest_framework.exceptions import APIException
 from ..models import Course, Enrollment, Learner, LearnerIdentity
 from lecture_library.models import LectureCapture, LectureResource
 from .recordings import duration_index, stored_duration, select_recordings
+from .attendance import attendance_status
 
 
 def require_database():
@@ -88,7 +89,7 @@ def lecture_summary(lecture, emails, enrolled, course_registry):
         "starts_at": lecture.starts_at, "ends_at": lecture.ends_at,
         "source": lecture.source_label, "learners": len(enrolled[lecture.course_source_id]),
         "recording_session": lecture.source_label == "Recording session",
-        "present": sum(x.attendance == "present" for x in observations.values()),
+        "present": sum(attendance_status(x.attendance, x.duration_seconds) == "present" for x in observations.values()),
         "recorded": sum(x.duration_seconds is not None or x.attendance in {"present", "absent", "review"} for x in observations.values()),
         "recordings": sum(x.kind == "recording" for x in resources),
         "playable_recordings": sum(x.kind == "recording" and x.readable for x in resources),
@@ -107,6 +108,20 @@ def lecture_queryset():
     )
 
 
+def catalogue_queryset():
+    """Hide cohort lectures without a Present learner; retain all source evidence."""
+    queryset = lecture_queryset()
+    _, emails, enrolled = registry()
+    hidden = [
+        lecture.pk
+        for lecture in queryset.prefetch_related(None).prefetch_related("observations")
+        if enrolled[lecture.course_source_id]
+        and not any(attendance_status(row.attendance, row.duration_seconds) == "present"
+                    for row in scoped_observations(lecture, emails, enrolled).values())
+    ]
+    return queryset.exclude(pk__in=hidden)
+
+
 def resolve_lecture(lecture_id):
     """Keep bookmarked fragment URLs usable after a same-day consolidation."""
     require_database()
@@ -114,10 +129,10 @@ def resolve_lecture(lecture_id):
     if not original:
         return None
     if original["active"]:
-        return lecture_queryset().filter(pk=lecture_id).first()
+        return catalogue_queryset().filter(pk=lecture_id).first()
     if original["session_date"] is None:
         return None
-    matches = list(lecture_queryset().filter(course_source_id=original["course_source_id"], session_date=original["session_date"])[:2])
+    matches = list(catalogue_queryset().filter(course_source_id=original["course_source_id"], session_date=original["session_date"])[:2])
     return matches[0] if len(matches) == 1 else None
 
 
@@ -130,7 +145,7 @@ def detail(lecture):
         speaking_seconds, speaking_match = speaking_result(row, emails)
         rows.append({
             "learner_id": learner.source_id, "name": learner.name, "email": learner.email,
-            "attendance": row.attendance if row else "not_available",
+            "attendance": attendance_status(row.attendance, row.duration_seconds) if row else "not_available",
             "first_join": row.first_join if row else None,
             "last_leave": row.last_leave if row else None,
             "duration_seconds": row.duration_seconds if row else None,

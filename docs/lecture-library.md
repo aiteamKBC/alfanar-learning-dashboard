@@ -39,6 +39,13 @@ fragments attach only when an actual interval for the same verified learner over
 that lecture's recorded timing. Otherwise a new report window needs five enrolled
 learners with at least 30 minutes of verified presence; smaller sessions are held.
 These library rules do not change official lecture denominators elsewhere.
+Within the stored lecture library, a learner's verified cumulative attendance of
+10 minutes or more qualifies as Present; a shorter visit without an explicit
+source Present/Absent remains Short visit. Repeat joins are unioned and gaps do
+not count. Imports and API display use the same ten-minute threshold, so existing
+rows also display correctly without rewriting stored evidence. Explicit source
+presence is retained when timing is missing or short. The live LMS module continues
+to display the LMS's stored statuses, and official dashboard KPI rules stay unchanged.
 Attendance and transcript speech intervals are unioned before daily totals are
 saved, excluding gaps and overlapping duplicates. Archived first/last times are
 treated as envelopes, not continuous presence, unless the archived duration fills
@@ -123,6 +130,15 @@ minutes, including lectures whose recordings are all short. Parts of at least
 10 minutes and unknown durations remain visible. This applies to existing and
 future library and live LMS lectures. Transcript parts and all attendance/speech
 evidence remain untouched. List counts and detail buttons use the same selection.
+
+The lecture catalogue hides known-cohort days with no uniquely matched enrolled
+learner marked `present`, including days containing only absent, unavailable or
+short-visit (`review`) observations. This applies before pagination and to direct
+detail/media routes, for both stored library and live LMS lectures. Unknown-module
+archive entries are kept separate because they have no cohort to check. The rule
+is evaluated on each read: a later confirmed Present makes an active day visible
+again. Source rows, recordings, attendance calculations and dashboard KPIs remain
+unchanged. Bookmarks for hidden days return to the current catalogue selection.
 
 LMS media duration is read from each artifact's exact start/end. Legacy library
 durations use a minimal private index of exact provider/drive/organizer/meeting/file

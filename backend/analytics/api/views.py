@@ -300,7 +300,7 @@ def lecture_list(request):
             "playable_recordings": sum(row['playable_recordings'] for row in rows), "updated_at": None,
             "results": rows[(page - 1) * size:page * size],
         })
-    queryset = library.lecture_queryset()
+    queryset = library.catalogue_queryset()
     if course is not None:
         queryset = queryset.filter(course_source_id=course)
     for name, lookup in (("from", "session_date__gte"), ("to", "session_date__lte")):

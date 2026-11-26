@@ -343,6 +343,22 @@ class ArmTests(ApiTestBase):
 
     # --- read-only guarantees -----------------------------------------------------------
 
+    def test_all_absent_lecture_is_hidden_from_catalogue_detail_and_media_only(self):
+        from analytics.arm import Arm
+        from analytics.lectures.lms_media import resource_id
+        value = self.media_snapshot()
+        for row in value.attendance:
+            row['attendance_status'] = 'absent'
+        with mock.patch('analytics.api.views.load_snapshot', return_value=value):
+            self.assertEqual(self.get(f'/api/lectures?course={ARM_COURSE_ID}')['count'], 0)
+            self.assertNotIn(Arm.lecture_id(COMPLETED), [r['id'] for r in self.get('/api/lectures')['results']])
+            url = '/api/lectures/' + Arm.lecture_id(COMPLETED)
+            self.assertEqual(self.client.get(url).status_code, 404)
+            self.assertEqual(self.client.get(url + '/resources/' + str(resource_id('ART-VIDEO'))).status_code, 404)
+        # Catalogue visibility must not rewrite source statuses or dashboard denominators.
+        self.assertEqual(len(Arm(value).sessions), 1)
+        self.assertEqual(value.attendance[0]['attendance_status'], 'absent')
+
     def media_snapshot(self):
         value = snapshot()
         value.artifacts = [
