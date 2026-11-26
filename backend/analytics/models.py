@@ -469,6 +469,19 @@ class IdentityMembership(models.Model):
         constraints = [models.UniqueConstraint(fields=['group', 'original'], name='unique_identity_membership')]
 
 
+class LmsIdentityMembership(models.Model):
+    """An owner-approved link of one live-LMS learner account to an identity group.
+
+    Holds only the LMS learner ID. LMS names, emails and learning records are never
+    copied here; they are read live from the LMS. A link applies while its group is active.
+    """
+    group = models.ForeignKey(IdentityGroup, on_delete=models.PROTECT, related_name='lms_memberships')
+    lms_learner_id = models.BigIntegerField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['group', 'lms_learner_id'], name='unique_lms_identity_membership')]
+
+
 class IdentityOperation(models.Model):
     import uuid
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
