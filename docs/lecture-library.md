@@ -23,6 +23,18 @@ Raw meeting names, staff and unmatched participants are never returned as roster
 rows. The API rechecks membership and identity matches on every request, including
 after a later LMS sync. Missing attendance is not an inferred absence.
 
+Owner merges apply at read time. A row stored under an original learner ID that an owner
+later merged into another learner counts for that merged learner (current identity
+projection); stored rows keep their original IDs and are never rewritten. Unmerge restores
+each learner's own rows. If a merged learner has several stored rows for one lecture, one
+row is shown as stored, never summed: Present before Absent before other statuses, then the
+longest stored duration, then the learner's own row. The same row drives the participant
+list, the lecture's Present count and whether the lecture is listed. Speaking time is
+taken from whichever of the merged learner's rows holds the strongest valid speaking
+evidence: verified identity before a meeting-name match, then the longer duration. Each
+row still has to pass the existing speaker check. Speech is never summed across rows,
+because the same utterances can be attributed to more than one account.
+
 Report aliases for the exact same meeting and actual time window are combined;
 attendance intervals are unioned across repeat joins and verified email aliases.
 The library presents one entry per module and Cairo calendar day, including
