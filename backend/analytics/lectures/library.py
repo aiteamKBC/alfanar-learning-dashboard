@@ -63,7 +63,7 @@ def visible_resources(lecture):
     resources = list(lecture.resources.all())
     index = duration_index()
     selected = {r.pk for r in select_recordings([r for r in resources if r.kind == 'recording'],
-                lambda r: stored_duration(r, index), lambda r: r.readable)}
+                lambda r: stored_duration(r, index))}
     return [r for r in resources if r.kind != 'recording' or r.pk in selected]
 
 
@@ -74,7 +74,7 @@ def recording_counts(queryset):
         grouped[asset.lecture_id].append(asset)
     index = duration_index()
     visible = [r for rows in grouped.values() for r in select_recordings(rows,
-               lambda r: stored_duration(r, index), lambda r: r.readable)]
+               lambda r: stored_duration(r, index))]
     return len(visible), sum(r.readable for r in visible)
 
 
