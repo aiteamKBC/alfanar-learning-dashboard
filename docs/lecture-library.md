@@ -128,8 +128,17 @@ publication checks; no source attendance, schedules or library rows are rewritte
 Recording display hides every clip with a verified duration shorter than 10
 minutes, including lectures whose recordings are all short. Parts of at least
 10 minutes and unknown durations remain visible. This applies to existing and
-future library and live LMS lectures. Transcript parts and all attendance/speech
+future library and live LMS lectures. All original media and attendance/speech
 evidence remain untouched. List counts and detail buttons use the same selection.
+
+Transcript display selects one main part per lecture: the readable transcript with
+the longest verified duration. The live LMS uses each artifact's start/end; stored
+library transcripts use the exact-source duration index, falling back to saved VTT
+cue spans for older installations. If no timing is available, stored text length
+is the fallback, then stable source order. Original transcript parts remain stored
+and all transcript segments still contribute to the existing Speaking calculation.
+The rule applies on every read to existing and future lectures without migrations
+or source writes. Counts and download buttons use the same selected part.
 
 The lecture catalogue hides known-cohort days with no uniquely matched enrolled
 learner marked `present`, including days containing only absent, unavailable or

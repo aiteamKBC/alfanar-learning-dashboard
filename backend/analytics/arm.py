@@ -22,6 +22,7 @@ from .lms_live import ARM_COURSE_ID, ARM_LEARNER_ID_OFFSET, ARM_TITLE, as_utc
 from .metrics import KIND_LABELS, LESSON_KIND_VALUES, _avg, _pct, defs, learner_rollup
 from .lectures.lms_media import resource_id, valid_reference
 from .lectures.recordings import select_recordings, seconds_between
+from .lectures.transcripts import select_transcript
 
 # LMS component types with a direct dashboard equivalent. Lecture components are reported
 # through the LMS live-session records instead; other types have no dashboard column.
@@ -185,7 +186,10 @@ class Arm:
             recordings = select_recordings([a for a in assets if a['artifact_type'] == 'recording'],
                                            lambda a: seconds_between(a.get('created_datetime'), a.get('end_datetime')))
             selected = {a['id'] for a in recordings}
-            self.artifacts[occurrence_id] = [a for a in assets if a['artifact_type'] != 'recording' or a['id'] in selected]
+            transcripts = select_transcript([a for a in assets if a['artifact_type'] == 'transcript'],
+                                            lambda a: seconds_between(a.get('created_datetime'), a.get('end_datetime')))
+            selected.update(a['id'] for a in transcripts)
+            self.artifacts[occurrence_id] = [a for a in assets if a['id'] in selected]
         # One LMS record per displayed learner and lecture. When merged accounts each have a
         # record, one stored record is shown as-is (never summed): see `_attendance_rank`.
         self.attendance = {}
